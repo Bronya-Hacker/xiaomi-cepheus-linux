@@ -273,3 +273,21 @@ struct clk_alpha_pll {
 camss 需要 CAMSS **175** 的资源表和 DT 节点 + 传感器驱动，见本文三、四节。
 时钟这一步已经过关：`cam_cc_cci_0_clk` / `cam_cc_cphy_rx_clk_src` 都在
 `clk_summary` 里，camss 探针时按需 enable 即可。
+
+## 十、M2 准备就绪，但还没上真机（停在"要不要刷 boot"这一步）
+
+已完成的部分（代码 + DT，都能编过）：
+
+- `wip/camss-sm8150/0001-camss-sm8150-resources.patch`：`sm8150_resources`
+  复用 SDM845 的 `csid_ops_gen2` / `csiphy_ops_3ph_1_0`（CSID175/VFE175 同代），
+  4×CSIPHY + 2×CSID + 2×VFE，地址/中断取自设备上的下游 DT；
+  时钟名改成 SM8150 camcc 的（**没有** `ife_*_areg` / `ife_*_ahb`，845 有 8150 没有）。
+- DT 节点 `camss@acb3000`，clocks 映射到 `CAM_CC_*`，默认 `status = "disabled"`。
+
+**卡住的原因**：DTB 是打包进 **edk2 的 boot.img** 的，`07-rebuild-all-wsl.sh`
+不会重新打 boot 镜像（out/boot-cepheus.img 时间戳一直是旧的）。所以要让 camss 探针，
+必须先重建 edk2 boot 镜像，再 `fastboot flash boot` —— 又是一次有风险的写入。
+
+要不要继续，我等你一句话。继续的话顺序是：
+重建 boot 镜像 → 节点改成 okay → `fastboot flash boot` → 开机 → `insmod qcom-camss.ko`
+→ 看 `media-ctl -p` 里有没有 CSIPHY→CSID→VFE 的实体图。
