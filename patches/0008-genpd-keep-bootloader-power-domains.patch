@@ -1,0 +1,62 @@
+--- a/drivers/pmdomain/core.c
++++ b/drivers/pmdomain/core.c
+@@ -3503,7 +3503,18 @@
+ 		if (genpd->provider == of_fwnode_handle(np)) {
+ 			genpd_lock(genpd);
+ 			genpd->stay_on = false;
+-			genpd_power_off(genpd, false, 0);
++			/*
++			 * Bring-up (cepheus / SM8150): do NOT power off domains that
++			 * no Linux driver has claimed.  The bootloader (ABL) leaves
++			 * MMCX powered because it drives the display for the boot
++			 * splash; mainline has no consumer for MMCX here (the dispcc
++			 * driver is blacklisted and the mdss node is disabled), so
++			 * this code voted the rail off ~0.3 s into boot, which
++			 * collapsed the whole DPU/DSI pipeline and froze the panel on
++			 * its last GRAM frame.  See docs/root-cause.md (10.15).
++			 */
++			pr_info("genpd: keeping %s powered (bring-up)\n",
++				genpd->name);
+ 			genpd_unlock(genpd);
+ 		}
+ 	}
+@@ -3531,7 +3542,9 @@
+ 	case GENPD_SYNC_STATE_SIMPLE:
+ 		genpd_lock(genpd);
+ 		genpd->stay_on = false;
+-		genpd_power_off(genpd, false, 0);
++		/* Bring-up: keep the bootloader's power state (see above). */
++		pr_info("genpd: keeping %s powered (bring-up)\n",
++			genpd->name);
+ 		genpd_unlock(genpd);
+ 		break;
+ 
+--- a/drivers/pmdomain/qcom/rpmhpd.c
++++ b/drivers/pmdomain/qcom/rpmhpd.c
+@@ -1081,11 +1081,22 @@
+ 			continue;
+ 
+ 		pd->state_synced = true;
+-		if (pd->enabled)
+-			corner = max(pd->corner, pd->enable_corner);
+-		else
+-			corner = 0;
+ 
++		/*
++		 * Bring-up (cepheus / SM8150): never vote a rail off just
++		 * because no Linux driver claimed it.  ABL leaves MMCX powered
++		 * for the display; voting corner 0 here collapses the whole
++		 * DPU/DSI pipeline ~0.3 s into boot and freezes the panel on its
++		 * last GRAM frame.  Keep the bootloader's level instead.
++		 * See docs/root-cause.md (10.15).
++		 */
++		if (!pd->enabled) {
++			pr_info("rpmhpd: keeping %s at bootloader level (bring-up)\n",
++				pd->res_name);
++			continue;
++		}
++
++		corner = max(pd->corner, pd->enable_corner);
+ 		ret = rpmhpd_aggregate_corner(pd, corner);
+ 		if (ret)
+ 			dev_err(dev, "failed to sync %s\n", pd->res_name);

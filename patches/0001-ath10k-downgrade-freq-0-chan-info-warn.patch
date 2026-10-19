@@ -1,0 +1,44 @@
+--- a/drivers/net/wireless/ath/ath10k/wmi.c
++++ b/drivers/net/wireless/ath/ath10k/wmi.c
+@@ -2735,8 +2735,18 @@
+ 
+ 	idx = freq_to_idx(ar, params->freq);
+ 	if (idx >= ARRAY_SIZE(ar->survey)) {
+-		ath10k_warn(ar, "chan info: invalid frequency %d (idx %d out of bounds)\n",
+-			    params->freq, idx);
++		/* ★ 本地补丁（2026-10-18，小米9 cepheus / WCN3990）：
++		 * 固件会把 freq=0 的占位 chan_info 事件也发上来，freq_to_idx()
++		 * 找不到就返回越界下标，于是刷
++		 *   "chan info: invalid frequency 0 (idx 41 out of bounds)"
++		 * usb11 实测：开机 3 条 + 之后每 5 分钟 1 条（16:44:43 / 16:49:43 / …）。
++		 * 这里**只把日志级别降到 ath10k debug，行为完全不变**
++		 * （默认 debug_mask=0 不打印；要看得用
++		 *  /sys/module/ath10k/parameters/debug_mask 打开）。
++		 */
++		ath10k_dbg(ar, ATH10K_DBG_WMI,
++			   "chan info: invalid frequency %d (idx %d out of bounds)\n",
++			   params->freq, idx);
+ 		return;
+ 	}
+ 
+@@ -2766,8 +2776,18 @@
+ 
+ 	idx = freq_to_idx(ar, params->freq);
+ 	if (idx >= ARRAY_SIZE(ar->survey)) {
+-		ath10k_warn(ar, "chan info: invalid frequency %d (idx %d out of bounds)\n",
+-			    params->freq, idx);
++		/* ★ 本地补丁（2026-10-18，小米9 cepheus / WCN3990）：
++		 * 固件会把 freq=0 的占位 chan_info 事件也发上来，freq_to_idx()
++		 * 找不到就返回越界下标，于是刷
++		 *   "chan info: invalid frequency 0 (idx 41 out of bounds)"
++		 * usb11 实测：开机 3 条 + 之后每 5 分钟 1 条（16:44:43 / 16:49:43 / …）。
++		 * 这里**只把日志级别降到 ath10k debug，行为完全不变**
++		 * （默认 debug_mask=0 不打印；要看得用
++		 *  /sys/module/ath10k/parameters/debug_mask 打开）。
++		 */
++		ath10k_dbg(ar, ATH10K_DBG_WMI,
++			   "chan info: invalid frequency %d (idx %d out of bounds)\n",
++			   params->freq, idx);
+ 		return;
+ 	}
+ 

@@ -1,0 +1,31 @@
+[Unit]
+Description=QRTR TFTP service
+Documentation=https://github.com/linux-msm/tqftpserv
+# 必须在 ADSP 起来之前就绪：ADSP 的 WLAN 子系统一开机就会通过 QRTR/TFTP
+# 请求 wlanmdsp.mbn，那一刻 tqftpserv 必须已经能应答。
+After=systemd-modules-load.service
+Wants=systemd-modules-load.service
+Before=wifi-up.service
+
+[Service]
+# ★ 这一行是照抄 Debian 官方包（tqftpserv 1.2-1）里的单元文件：
+#       ExecStart=/usr/bin/tqftpserv
+#   官方就是【不带任何参数】。不要自己加 -r /lib/firmware（没有这个参数）。
+#
+#   路径翻译规则（upstream translate.c 源码，已核对）：
+#     客户端请求 /readonly/firmware/image/<X>
+#       → 遍历 /sys/class/remoteproc/*/firmware，取每个 remoteproc 的
+#         firmware-name 的“目录名”，拼成 /lib/firmware/<目录名>/<X>
+#   我们 DTB 里给 ADSP 写的是 firmware-name = "qcom/sm8150/adsp.mdt"，
+#   目录名 = qcom/sm8150 ⇒ 客户端请求 wlanmdsp.mbn 就会命中
+#         /lib/firmware/qcom/sm8150/wlanmdsp.mbn
+#   （顺带：它还会自动尝试 .xz / .zst 压缩版本）
+ExecStart=/usr/bin/tqftpserv
+Restart=always
+RestartSec=2
+StateDirectory=tqftpserv
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

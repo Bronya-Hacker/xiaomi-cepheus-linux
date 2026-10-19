@@ -1,0 +1,18 @@
+--- a/drivers/input/touchscreen/fts_touch/fts.c
++++ b/drivers/input/touchscreen/fts_touch/fts.c
+@@ -5277,7 +5277,14 @@
+   * to the linux input subsystem etc.
+   */
+ #ifdef CONFIG_TOUCHSCREEN_STM_FTS_DOWNSTREAM_I2C
+-static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)
++/*
++ * 6.3 起 i2c_driver.probe 的参数去掉了那个 const struct i2c_device_id *
++ * （本内核 v6.17 的 include/linux/i2c.h 是：
++ *      int (*probe)(struct i2c_client *client);
++ *  这份驱动是从厂商树带出来的旧签名，只有编 I2C 变体时才会暴露这个错误）。
++ * idp 在函数体里从头到尾没被用过，直接删掉参数即可。
++ */
++static int fts_probe(struct i2c_client *client)
+ {
+ #else
+ static int fts_probe(struct spi_device *client)

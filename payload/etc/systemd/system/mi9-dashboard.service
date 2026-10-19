@@ -1,0 +1,32 @@
+# ---------------------------------------------------------------------------
+# mi9-dashboard.service —— 手机屏幕（tty1）上的只读状态仪表盘
+#
+# 2026-10-19 服务器化：用户放弃 GUI，但手机没键盘、触摸也打不了字，屏幕唯一
+# 的用处就是"看"。所以把 tty1 从"谁也敲不了的 getty"换成这个仪表盘：
+#   * 每 5 秒跑一次 mi9-status.sh，内容变了才重画（不闪屏）；
+#   * 交互入口保持不变：串口 ttyGS0（115200 8N1）与 SSH（USB/WiFi）。
+# getty@tty1 已在 payload 里被 mask 掉（否则它和仪表盘抢同一块屏幕）。
+#
+# 注意：TTYReset/TTYVHangup 都设成 no —— 我们只想往这块 tty 上写字符，
+#       不希望 systemd 在启停时把 VT 状态或别的进程一起收拾了。
+# ---------------------------------------------------------------------------
+[Unit]
+Description=MI9 server status dashboard on tty1 (read-only screen)
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/mi9-dashboard.sh
+Environment=MI9_DASH_INTERVAL=5
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYReset=no
+TTYVHangup=no
+Restart=always
+RestartSec=5
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

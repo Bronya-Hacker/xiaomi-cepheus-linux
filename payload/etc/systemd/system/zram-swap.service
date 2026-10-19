@@ -1,0 +1,32 @@
+# ---------------------------------------------------------------------------
+# zram-swap.service —— 用一段压缩内存当交换区（服务器防 OOM）
+#
+# 为什么（2026-10-19 服务器化）：
+#   本机 5.2G 物理内存，无 swap。跑编译/固件解压这种内存尖峰会直接 OOM 杀进程，
+#   而手机上"被 OOM 杀掉"往往表现为莫名其妙的进程消失。zram 用 LZ4/ZSTD 压过的
+#   内存当 swap，代价极低（压缩率通常 2~4x），尖峰时能顶住。
+#
+# 为什么自己写 unit 而不是装 zram-tools：
+#   这台设备的 rootfs 是别人给的 Klipper 镜像，尽量少动它的包管理；
+#   而且 zram 的配置就三行 sysfs，自己写一目了然。
+#
+# 注意：
+#   * 片段里所有 ">" 都是写 sysfs，必须 root；ExecStart 用 /bin/sh -c。
+#   * comp_algorithm 要先选（本机内核支持的：zstd），选不到就保持默认 lzo。
+#   * swapon -p 100 = 高优先级，内核优先用它，减少直接回收。
+# ---------------------------------------------------------------------------
+[Unit]
+Description=zram compressed swap (2G)
+Documentation=man:zramctl(8) man:swapon(8)
+DefaultDependencies=no
+After=systemd-modules-load.service
+Before=swap.target sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'modprobe zram num_devices=1; echo zstd > /sys/block/zram0/comp_algorithm 2>/dev/null || true; echo 2147483648 > /sys/block/zram0/disksize; mkswap /dev/zram0; swapon -p 100 /dev/zram0'
+ExecStop=/bin/sh -c 'swapoff /dev/zram0; echo 1 > /sys/block/zram0/reset'
+
+[Install]
+WantedBy=swap.target

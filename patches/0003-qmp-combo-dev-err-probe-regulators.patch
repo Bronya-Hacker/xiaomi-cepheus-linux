@@ -1,0 +1,22 @@
+--- a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
++++ b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+@@ -3418,10 +3418,15 @@
+ 		qmp->vregs[i].supply = cfg->vreg_list[i].name;
+ 
+ 	ret = devm_regulator_bulk_get(dev, num, qmp->vregs);
+-	if (ret) {
+-		dev_err(dev, "failed at devm_regulator_bulk_get\n");
+-		return ret;
+-	}
++	/*
++	 * 用 dev_err_probe：-EPROBE_DEFER（regulator 还没注册好）是常规的
++	 * 延迟探测，不该刷 err 日志。实测 sm8150/cepheus 上这条 err 就是
++	 * 开机 0.22s 时的一次 defer，phy 后来 probe 成功（88e8000.phy 已绑定
++	 * qcom-qmp-combo-phy、/sys/class/phy 下有两个 phy）。
++	 * 真错误（非 -EPROBE_DEFER）依旧照常上报。
++	 */
++	if (ret)
++		return dev_err_probe(dev, ret, "failed at devm_regulator_bulk_get\n");
+ 
+ 	for (i = 0; i < num; i++) {
+ 		ret = regulator_set_load(qmp->vregs[i].consumer,

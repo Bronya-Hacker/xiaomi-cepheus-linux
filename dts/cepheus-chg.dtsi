@@ -1,0 +1,63 @@
+/* ==== cepheus-chg: PM8150B 充电器 + 电量计（power_supply） ==== */
+/*
+ * 目的：让 /sys/class/power_supply 出现电池与充电器，能读
+ *       电量 / 电压 / 电流 / 温度 / 充电状态，并支持软件停充（限充）。
+ *
+ * 依据（2026-10-19 查主线 6.17 源码 + 对照同 SoC 板子 + 原厂 dtbo）：
+ *
+ *  1) 驱动都在主线，且本机内核已经编进去了（=y，不用改 config）：
+ *       drivers/power/supply/qcom_smbx.c  CONFIG_CHARGER_QCOM_SMB2=y
+ *         -> compatible "qcom,pm8150b-charger"（SMB5），
+ *            暴露 status/online/current_max/current_now/voltage_now/
+ *            health/usb_type。其中 status 与 current_max 可写：
+ *              current_max —— USB 输入限流 ICL（0..4800000 uA）
+ *              status      —— 写 "Unknown" 会置 USBIN_SUSPEND_BIT（停充），
+ *                             写 "Charging" 清掉（恢复充电）
+ *            这正是"限充到 80%"要用的两个旋钮。
+ *       drivers/power/supply/qcom_fg.c    CONFIG_BATTERY_QCOM_FG=y
+ *         -> compatible "qcom,pm8150b-fg"（gen4），注册 "qcom-battery"，
+ *            暴露 capacity/voltage_now/current_now/temp/status/health。
+ *
+ *  2) 节点本身在主线 pm8150b.dtsi 里（本机 DTS 已 include），默认 disabled：
+ *       pm8150b_charger: charger@1000   io-channels = usbin_i / usbin_v
+ *       pm8150b_adc:     adc@3100       （无 status，默认就绪，提供上面两个通道）
+ *       pm8150b_fg:      fuel-gauge@4000
+ *     所以本片段只做"打开 + 挂电池信息"，不新增寄存器地址。
+ *
+ *  3) 电池参数（小米9 / cepheus 官方值）：
+ *       额定容量 3300 mAh（typ），标称 3.85V，充电截止 4.4V；
+ *       原厂 dtbo 的 qcom,fv-max-uv = 0x432380 = 4400000 uV 吻合，
+ *       qcom,chg-term-current-ma = -220（截止电流 220mA）。
+ *       下限沿用主线 raphael 的 3.4V。
+ *
+ *  4) 为什么不加 pm8150b_vbus：
+ *       那是 OTG 对外 5V 输出的 regulator，本机暂不做 USB Host，先不开。
+ *
+ *  5) 风险与回退：
+ *       该驱动会重写一遍 SMB5 初始化（清 suspend、开 CHARGING_ENABLE、
+ *       关看门狗、开 AICL），默认按 SDP 500mA 起步，APSD 识别到 DCP 后
+ *       由 smb_status_change_work 提到 1.5A。若发现充电异常，直接刷回
+ *       上一版 boot 镜像即可（DTB 在 boot 里，不涉及 rootfs）。
+ */
+/ {
+	battery: battery {
+		compatible = "simple-battery";
+
+		charge-full-design-microamp-hours = <3300000>;
+		voltage-min-design-microvolt = <3400000>;
+		voltage-max-design-microvolt = <4400000>;
+	};
+};
+
+&pm8150b_fg {
+	status = "okay";
+
+	monitored-battery = <&battery>;
+	power-supplies = <&pm8150b_charger>;
+};
+
+&pm8150b_charger {
+	status = "okay";
+
+	monitored-battery = <&battery>;
+};

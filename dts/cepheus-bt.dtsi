@@ -1,0 +1,62 @@
+/* ==== cepheus-bt: WCN3990 蓝牙（uart13 / QUPV3 WRAP2 SE3） ==== */
+/*
+ * 依据（2026-10-19 反编译原厂 dtbo + 对照主线同 SoC 板子）：
+ *
+ *  1) 串口是哪一路
+ *     原厂 dtbo 的 aliases 里写着：
+ *         qupv3_se12_2uart = "/fragment@69";   <- 调试串口（2 线）
+ *         qupv3_se13_4uart = "/fragment@71";   <- 蓝牙（4 线，带流控）
+ *     而夹在中间的 fragment@70 正是 bt_wcn3990（compatible = "qca,wcn3990"）。
+ *     SM8150 上 vendor 的 qupv3_se13 对应主线 uart13
+ *     （serial@c8c000，GCC_QUPV3_WRAP2_S3_CLK），
+ *     与小米 raphael（8/9T Pro）、nabu（平板5）、Google flame 完全一致。
+ *     （uart2 只是 vendor 的 serial0 调试口，本片段不动它。）
+ *
+ *  2) 三路供电怎么映射
+ *     原厂 dtbo 里 bt_wcn3990 的 phandle 落在：
+ *         qca,bt-vdd-core = pm8150_l7   1.8V    -> 主线 vddio / vddxo
+ *         qca,bt-vdd-pa   = pm8150l_l2  1.304V  -> 主线 vddrf
+ *         qca,bt-vdd-ldo  = pm8150l_l11 3.312V  -> 主线 vddch0
+ *     与 raphael 的 vddio/vddxo = L7A、vddrf = L2C、vddch0 = L11C 一一对应；
+ *     这三路也正好是我们的 WiFi 节点在用的（1.8-xo / 1.3-rfa / 3.3-ch0）。
+ *     hci_qca 的 wcn3990 支持表要求 4 路都在（vddio/vddxo/vddrf/vddch0）。
+ *
+ *  3) 引脚
+ *     主线 sm8150.dtsi 的 qup_uart13_default 就是四线
+ *     （pins = gpio43/44/45/46，function = "qup13"），
+ *     uart13 节点自带 pinctrl-0，所以这里不必再补 default 状态。
+ *     raphael/flame 也只是加了个 sleep 状态，本机不做省电，先不加。
+ *
+ *  4) 固件
+ *     btqca 默认按芯片上报的 soc_ver 推算 ROM 版本再拼文件名。实测这颗芯片
+ *     上报的 soc_ver 让驱动算成 rom_ver=1（日志：QCA Downloading
+ *     qca/crbtfw01.tlv → -ENOENT），但设备上真实存在的是 21 版
+ *     （linux-firmware: qca/crbtfw21.tlv + qca/crnv21.bin，带 .zst 压缩）。
+ *     因此这里和小米 raphael 一样显式给出文件名（顺序固定：先 nvm 后 rampatch，
+ *     见 hci_qca.c qca_get_firmware_name / qca_get_rampatch_name）。
+ *
+ *  5) 地址
+ *     btqca 下载完 NVM 后会读一次芯片 BD_ADDR；若读到的是 NVM 里的默认值，
+ *     就置 HCI_QUIRK_USE_BDADDR_PROPERTY（drivers/bluetooth/btqca.c
+ *     qca_check_bdaddr），控制器随之进入 HCI_UNCONFIGURED —— 表现为
+ *     bluetoothd 报 "No default controller available"、hciconfig up 报
+ *     EOPNOTSUPP(95)。主线小米平板5（nabu）就是靠 DT 的 local-bd-address 解决。
+ *     这里给一个本地管理地址（与 WiFi 固定 MAC 02:00:71:96:e3:d6 相邻）。
+ */
+&uart13 {
+	status = "okay";
+
+	bluetooth {
+		compatible = "qcom,wcn3990-bt";
+
+		vddio-supply  = <&vreg_l7a_1p8>;
+		vddxo-supply  = <&vreg_l7a_1p8>;
+		vddrf-supply  = <&vreg_l2c_1p3>;
+		vddch0-supply = <&vreg_l11c_3p3>;
+
+		firmware-name = "crnv21.bin", "crbtfw21.tlv";
+		local-bd-address = [02 00 71 96 e3 d7];
+
+		max-speed = <3200000>;
+	};
+};

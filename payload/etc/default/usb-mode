@@ -1,0 +1,10 @@
+# USB gadget 模式（usb-net.service 用）
+#
+#   ncm   = NCM 网卡 + ACM 串口  ← 默认。前人验证过 Windows 能枚举成功（有 COMx）
+#   rndis = RNDIS 网卡 + ACM 串口 ← Windows 认成网卡后改这个，SSH 走 usb0
+#   acm   = 只要串口（网卡都不要）
+#
+# 临时切换（不用改这里）：
+#   usb-mode.sh switch rndis      # 90 秒内确认可用就 usb-mode.sh keep
+#   usb-mode.sh switch ncm
+USB_MODE=ncm

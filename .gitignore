@@ -1,0 +1,16 @@
+# ---- 构建产物（可由 scripts/0*.sh 重新生成，不入库） ----
+out/
+*.img
+*.zip
+*.log
+
+# ---- 可再生成的二进制/厂商件 ----
+# 893528 字节的原厂 board-2.bin 仅作备查（运行用的是 payload 里 26440 字节那份）
+extras/board-2.bin.xiaomi-vendor-*
+
+# ---- 编辑器/系统垃圾 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

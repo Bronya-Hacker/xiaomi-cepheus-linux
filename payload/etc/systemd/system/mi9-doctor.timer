@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------------------
+# mi9-doctor.timer —— 定时跑自检/自愈
+#
+#   OnBootSec=3min   开机 3 分钟后先做一次（等网络/无线都稳了）
+#   OnCalendar=*:0/15  之后每 15 分钟一次
+#
+# ★ 为什么用 OnCalendar 而不是只写 OnUnitActiveSec：
+#   本机的 rtc-save.timer 曾经出现 `NextElapseUSecMonotonic=infinity` ——
+#   单元 `RemainAfterExit=yes` 时 OnUnitActiveSec 的基准会变得很反直觉，
+#   于是"看起来配好了、其实再也不触发"。OnCalendar 是绝对时刻，最稳。
+#   （本单元是 oneshot 且没有 RemainAfterExit，两种写法其实都行，但保持一致更好。）
+# ---------------------------------------------------------------------------
+[Unit]
+Description=Run MI9 base self-check every 15 minutes
+
+[Timer]
+OnBootSec=3min
+OnCalendar=*:0/15
+AccuracySec=30s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

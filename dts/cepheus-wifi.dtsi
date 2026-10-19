@@ -1,0 +1,177 @@
+
+/*
+ * ============================================================================
+ *  Xiaomi Mi 9 (cepheus, SM8150) —— 板级启用补丁（“能启动” + WiFi）
+ *  追加到 arch/arm64/boot/dts/qcom/sm8150-xiaomi-cepheus.dts 末尾
+ *  ----------------------------------------------------------------------------
+ *  本文件有两部分，**缺任何一部分手机都进不了系统**：
+ *
+ *    第 0 部分【UFS】：让内核看得到 /dev/sda*（根文件系统在这上面）
+ *    第 1 部分【WiFi】：WCN3990 / ath10k_snoc（ADSP + 供电）
+ *
+ *  ⚠️ 血的教训（2026-10-18，上机实证）：
+ *     只打第 1 部分、漏掉第 0 部分时，手机会出现这种“看起来像卡死”的现象：
+ *       - fbcon 起来、画面上有企鹅、内核日志停在半路不再滚动；
+ *       - initramfs 里的等待循环永远等不到 /dev/sda*（UFS 被 disabled，
+ *         内核里压根没有这个块设备）→ 静默等到超时后死循环；
+ *       - Windows 也扫不到 USB（因为系统根本没进 userspace，
+ *         gadget 是 userspace 用 configfs 拉起来的）。
+ *
+ *     对比方法（可复现）：把 build 出来的 DTB 解成 DTS，
+ *     看 /soc@0/ufshc@1d84000 的 status：
+ *         status = "disabled";  →  ★ 必然卡在 initramfs
+ *         status = "okay";      →  正常
+ * ============================================================================
+ */
+
+/* ==========================================================================
+ * 第 0 部分：UFS（根文件系统所在）—— 少一段就起不来
+ * ==========================================================================
+ *
+ * sm8150.dtsi 里 ufs_mem_hc / ufs_mem_phy 默认都是 status="disabled"，
+ * 上游 sm8150-xiaomi-cepheus.dts 里**根本没有** &ufs_mem_hc 这一段
+ * （板级支持不全），所以必须由这里补上。
+ *
+ * 下面这些值和 dolby“前人的能启动镜像”里的 DTB **逐属性对齐**（唯一差别是
+ * phandle 数值），来源是厂商 DT，和 sm8250-xiaomi-nabu 的写法同源：
+ *
+ *   reset-gpios : &tlmm GPIO 175，低有效（ufs-qcom 里是 optional，
+ *                 但已知能启动的配置里带着它，就照着带）
+ *   vcc-supply  : PM8150  LDO10 (2.504~2.96V, 750mA)  —— UFS 主供电
+ *   vccq2-supply: PM8150  S4    (1.8V 固定)           —— UFS I/O 供电
+ *   vdda-phy    : PM8150  LDO5  (0.88V)               —— UFS PHY
+ *   vdda-pll    : PM8150L LDO3  (1.2V)                —— UFS PHY PLL
+ *
+ * 内核侧依赖（都已是 =y，见 scripts/02-build-kernel.sh）：
+ *   CONFIG_EXT4_FS=y           initramfs 里 mount -t ext4 必需
+ *   CONFIG_SCSI_UFS_QCOM=y     UFS 控制器
+ *   CONFIG_PHY_QCOM_QMP_UFS=y  SM8150 是 QMP UFS PHY
+ *   CONFIG_QCOM_INLINE_CRYPTO_ENGINE=y  ufshc 的 qcom,ice 指向它
+ *   ↑ 这些**必须是 y 不能是 m**：模块要等根文件系统挂上才能加载（鸡生蛋死锁）
+ */
+&ufs_mem_hc {
+	status = "okay";
+
+	reset-gpios = <&tlmm 175 GPIO_ACTIVE_LOW>;
+
+	vcc-supply = <&vreg_l10a_2p5>;
+	vcc-max-microamp = <750000>;
+
+	vccq2-supply = <&vreg_s4a_1p8>;
+	vccq2-max-microamp = <750000>;
+};
+
+&ufs_mem_phy {
+	status = "okay";
+
+	vdda-phy-supply = <&vreg_l5a_0p875>;
+	vdda-pll-supply = <&vreg_l3c_1p2>;
+};
+
+
+/* ==========================================================================
+ * 第 1 部分：WCN3990 / ath10k_snoc WiFi 启用
+ * --------------------------------------------------------------------------
+ *  为什么必须改 DTB（上机日志证据链）：
+ *
+ *  1) ath10k_snoc 驱动会执行：qmi_handle_init(AF_QIPCRTR) +
+ *     qmi_add_lookup(WLFW) 去等一个叫 "WLFW" 的 QMI 服务；
+ *  2) 这个服务不在 kernel 里，而是 ADSP 里跑的 WLAN 固件对外广播的；
+ *  3) sm8150.dtsi 里 4 个 remoteproc（adsp/mpss/slpi/cdsp）默认
+ *     status="disabled" → ADSP 从来没有被 Linux 拉起过
+ *     → 手机上 /sys/class/rpmsg 和 /sys/bus/rpmsg/devices/ 都是空的
+ *     → WLFW 服务永远不出现 → wlan0 永远不出现；
+ *  4) 所以只加载 qrtr/qrtr-smd/qcom_glink_smem 模块是没用的：
+ *     -517(EAFNOSUPPORT/EPROBE_DEFER) 会消失，但服务还是没人提供。
+ *
+ *  注：ADSP 起来之后仍需要 userspace 的 tqftpserv 给 DSP 喂
+ *      qcom/sm8150/wlanmdsp.mbn，详见 ../README.md 第 3 阶段。
+ *      DTB 只解决"把 ADSP 拉起来"这一环。
+ * ==========================================================================
+ */
+
+/* ADSP：WiFi 必需。它同时提供 lpass glink 端点，QRTR 的 IPCRTR 通道靠它 */
+&remoteproc_adsp {
+	status = "okay";
+	/*
+	 * 手上这台机器 /lib/firmware/qcom/sm8150/ 里是拆分固件：
+	 *   adsp.mdt + adsp.b00 ~ adsp.b13
+	 * 所以这里必须写 .mdt；不要写 .mbn（那是 linux-firmware 里的单体固件）。
+	 */
+	firmware-name = "qcom/sm8150/adsp.mdt";
+};
+
+/*
+ * MPSS(modem)：**WiFi 不依赖它**，这里开着的唯一目的是当"诊断信号"
+ *   —— 如果它也能到 running，说明 PAS + SCM + AOSS-QMP + QRTR 这套基础设施是好的。
+ *
+ * ⚠️ 注意：modem 起来后会通过 **rmtfs**（另一个服务，本包没带）要 EFS 分区，
+ *    所以多半会在 dmesg 里刷 modem 相关的错误。**那些错误不影响 WiFi**。
+ *    如果嫌吵，把下面这段整个注释掉（或改成 disabled）再重编内核即可。
+ *    同理：如果 /lib/firmware/qcom/sm8150/modem.mdt 根本不存在，
+ *    这里只会有一行 -ENOENT，也是无害的。
+ */
+&remoteproc_mpss {
+	status = "okay";
+	/* 同类：modem.mdt + modem.b00 ~ modem.b31 */
+	firmware-name = "qcom/sm8150/modem.mdt";
+};
+
+/*
+ * ★ 顺带记一个容易漏的依赖（本轮查证）：
+ *   sm8150.dtsi 里 ADSP 节点带 `qcom,qmp = <&aoss_qmp>`
+ *   —— SM8150 的 ADSP 必须通过 **AOSS QMP** 才能出复位。
+ *   所以内核配置里必须有 CONFIG_QCOM_AOSS_QMP=y（我们的 .config 里是 y ✓）。
+ *   如果哪天 dmesg 报 aoss_qmp 相关的 -EPROBE_DEFER，先查这一项。
+ */
+
+/*
+ * CDSP / SLPI：与 WiFi 无关。手机上只有 adsp/modem 的固件，
+ * 贸然打开只会让 remoteproc 加载失败刷错误日志，显式关掉。
+ */
+&remoteproc_cdsp {
+	status = "disabled";
+};
+
+&remoteproc_slpi {
+	status = "disabled";
+};
+
+&wifi {
+	status = "okay";
+
+	/*
+	 * 四路供电。不写也能 probe（driver 会 fallback 到 dummy regulator，
+	 * 上机日志里就是那 5 条 "supply ... not found, using dummy regulator"），
+	 * 但 WCN3990 有可能因为没真正上电而加载固件失败，所以补全。
+	 *
+	 * 标签来自本文件上方 apps_rsc 里的 pm8150-rpmh-regulators /
+	 * pm8150l-rpmh-regulators，与 sm8150-hdk / xiaomi-nabu / google-flame
+	 * 的写法完全一致：
+	 *   vdd-0.8-cx-mx -> PM8150  LDO1  (0.752V)
+	 *   vdd-1.8-xo    -> PM8150  LDO7  (1.8V)
+	 *   vdd-1.3-rfa   -> PM8150L LDO2  (1.304V)
+	 *   vdd-3.3-ch0   -> PM8150L LDO11 (3.0~3.312V)
+	 */
+	vdd-0.8-cx-mx-supply = <&vreg_l1a_0p75>;
+	vdd-1.8-xo-supply = <&vreg_l7a_1p8>;
+	vdd-1.3-rfa-supply = <&vreg_l2c_1p3>;
+	vdd-3.3-ch0-supply = <&vreg_l11c_3p3>;
+
+	/*
+	 * vdd-3.3-ch1 是较新内核给 WCN3990 追加的第 5 路可选电源轨
+	 * （日志里也出现了它）。上游所有 sm8150 板子都没写这行；
+	 * 如果 dmesg 里还在抱怨 ch1，就取消下面这行注释再试：
+	 *
+	 * vdd-3.3-ch1-supply = <&vreg_l10c_3p3>;
+	 */
+
+	/*
+	 * board-2.bin 的变体名。linux-firmware 的
+	 * ath10k/WCN3990/hw1.0/board-2.bin 里根本没有 "Xiaomi_cepheus"，
+	 * 填不存在的名字不会编译/加载失败，但会退回通用条目。
+	 * raphael（小米9T Pro）是同一颗 SM8150 + 同一代 WCN3990 模组，
+	 * 用它是最接近的匹配；也可以改成 "Qualcomm_sm8150hdk" 或删掉整行。
+	 */
+	qcom,calibration-variant = "Xiaomi_raphael";
+};

@@ -1,0 +1,13 @@
+[Unit]
+Description=Periodically save system clock to PMIC RTC
+Documentation=file:/usr/sbin/rtc-save.sh
+
+[Timer]
+# 开机 2 分钟时存一次（那时 NTP/timesyncd 已经把时间修正过了），
+# 之后每 30 分钟一次；关机前那一次由 rtc-save.service 的 ExecStop 负责。
+OnBootSec=2min
+OnUnitActiveSec=30min
+Unit=rtc-save.service
+
+[Install]
+WantedBy=timers.target

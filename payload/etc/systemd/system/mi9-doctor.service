@@ -1,0 +1,22 @@
+# ---------------------------------------------------------------------------
+# mi9-doctor.service —— 服务器底座自检/自愈（由 mi9-doctor.timer 定时触发）
+#
+# 干的事（详见 /usr/sbin/mi9-doctor.sh 头部注释）：
+#   权限（/root 必须 0700，否则 sshd 直接拒绝 root 公钥 —— 2026-10-19 事故）、
+#   sshd 活着、zram 交换在、看门狗在、WiFi 连着、磁盘/日志没涨爆、温度、
+#   失败单元清理；结果每次追加一行到 /var/log/mi9-health.log。
+#
+# 为什么不用 cron：本机没装 cron，systemd 原生 timer 就够。
+# ---------------------------------------------------------------------------
+[Unit]
+Description=MI9 server base self-check and repair
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/mi9-doctor.sh --fix --quiet
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

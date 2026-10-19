@@ -1,0 +1,30 @@
+--- a/drivers/gpu/drm/bridge/aux-bridge.c
++++ b/drivers/gpu/drm/bridge/aux-bridge.c
+@@ -119,9 +119,25 @@
+ 
+ 	data->dev = &auxdev->dev;
+ 	data->next_bridge = devm_drm_of_get_bridge(&auxdev->dev, auxdev->dev.of_node, 0, 0);
+-	if (IS_ERR(data->next_bridge))
+-		return dev_err_probe(&auxdev->dev, PTR_ERR(data->next_bridge),
++	if (IS_ERR(data->next_bridge)) {
++		int ret = PTR_ERR(data->next_bridge);
++
++		/*
++		 * -ENODEV 表示这条 DRM 桥链的下一级在 DT 里压根不存在/是 disabled
++		 * （cepheus 现在就是：displayport-controller disabled + 没有面板桥）。
++		 * aux-bridge 只是桥链里的占位符，没有下一级就是"用不上它"，
++		 * 不是错误 —— 降成 info，别每次开机刷一条 err。
++		 * 其它错误（尤其 -EPROBE_DEFER）仍按原来的等级上报。
++		 */
++		if (ret == -ENODEV) {
++			dev_info(&auxdev->dev,
++				 "no downstream drm bridge, aux bridge unused\n");
++			return ret;
++		}
++
++		return dev_err_probe(&auxdev->dev, ret,
+ 				     "failed to acquire drm_bridge\n");
++	}
+ 
+ 	data->bridge.of_node = data->dev->of_node;
+ 

@@ -1,0 +1,26 @@
+* text=auto eol=lf
+
+# 构建脚本必须是 LF（CRLF 会让设备上的 bash 报 $'\r': command not found）
+*.sh    text eol=lf
+*.dts   text eol=lf
+*.dtsi  text eol=lf
+*.patch text eol=lf
+*.conf  text eol=lf
+
+# Windows 侧脚本保持 CRLF
+*.ps1   text eol=crlf
+*.cmd   text eol=crlf
+
+# 二进制
+*.img   binary
+*.bin   binary
+*.mbn   binary
+*.tlv   binary
+*.gz    binary
+*.zst   binary
+*.so*   binary
+
+# 无扩展名的 ELF（tqftpserv 等）与固件目录整体按二进制处理
+payload/usr/bin/*                   binary
+payload/usr/lib/tqftpserv-bundle/*  binary
+payload/lib/firmware/**             binary

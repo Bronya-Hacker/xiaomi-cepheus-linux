@@ -1,0 +1,23 @@
+--- a/drivers/input/touchscreen/fts_touch/fts_proc.c
++++ b/drivers/input/touchscreen/fts_touch/fts_proc.c
+@@ -1097,8 +1097,20 @@
+ 			fileSize |= 0x00200000;
+ #endif
+ 
++#ifdef CONFIG_TOUCHSCREEN_STM_FTS_DOWNSTREAM_I2C
++			/*
++			 * I2C 没有 "3-wire" 这个概念，所以原 SPI 分支里那句
++			 *   (getClient()->mode & SPI_3WIRE) == 0
++			 * 在 I2C 上恒为真（struct i2c_client 也根本没有 mode 成员，
++			 * 直接编会报 "no member named 'mode'"）。
++			 * 而且这段只在用户态主动请求刷固件时才走到 —— 本机不刷固件，
++			 * 保持和 SPI 分支等价的语义就行。
++			 */
++			fileSize |= 0x00400000;
++#else
+ 			if (getClient() && (getClient()->mode & SPI_3WIRE) == 0)
+ 				fileSize |= 0x00400000;
++#endif
+ 
+ #ifdef PHONE_KEY	/* it is a feature enabled in the config of the chip */
+ 			fileSize |= 0x00000100;

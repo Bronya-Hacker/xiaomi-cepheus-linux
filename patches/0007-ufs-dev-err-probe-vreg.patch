@@ -1,0 +1,20 @@
+--- a/drivers/ufs/core/ufshcd.c
++++ b/drivers/ufs/core/ufshcd.c
+@@ -9298,8 +9298,15 @@
+ 	vreg->reg = devm_regulator_get(dev, vreg->name);
+ 	if (IS_ERR(vreg->reg)) {
+ 		ret = PTR_ERR(vreg->reg);
+-		dev_err(dev, "%s: %s get failed, err=%d\n",
+-				__func__, vreg->name, ret);
++		/*
++		 * 改成 dev_err_probe()：-EPROBE_DEFER 时**不打日志**，真错误照旧。
++		 * 上游这里是 dev_err()，于是"PMIC regulator 还没注册好"这种
++		 * 完全正常的一次延迟探测会在 dmesg 里留下一条 err 级噪音：
++		 *   ufshcd-qcom 1d84000.ufshc: ufshcd_get_vreg: vccq2 get failed, err=-517
++		 * （-517 = -EPROBE_DEFER；2026-10-18 usb13 冷启动实测能复现。）
++		 */
++		dev_err_probe(dev, ret, "%s: %s get failed\n",
++				__func__, vreg->name);
+ 	}
+ out:
+ 	return ret;

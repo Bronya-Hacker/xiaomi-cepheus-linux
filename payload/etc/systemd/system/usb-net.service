@@ -1,0 +1,25 @@
+[Unit]
+Description=USB gadget (NCM/RNDIS 网卡 + ACM 串口) 与 usb0 静态 IP
+Documentation=file:///etc/default/usb-mode
+After=local-fs.target systemd-modules-load.service
+# ★★ 不要写 Before=network-pre.target！
+#   2026-10-18 实测：这个单元里任何一次同步 `systemctl`（restart getty / start ssh）
+#   都会和它自己的依赖互等 → 卡满 TimeoutStartSec；而 `Before=network-pre.target`
+#   会把 NetworkManager、wifi-up 一起拖后整整 3 分钟（"WiFi 3 分钟才可用"的真凶）。
+#   只需要"尽早"，不需要"早于网络"：usb0 由 initramfs 阶段的 gadget 就已经存在，
+#   而且 NM 把 usb0 当 unmanaged 处理（不依赖这个顺序）。
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# 想换模式（例如确认 RNDIS 可用后固化）就改 /etc/default/usb-mode
+Environment=USB_MODE=ncm
+EnvironmentFile=-/etc/default/usb-mode
+ExecStart=/usr/sbin/usb-mode.sh up ${USB_MODE}
+ExecStartPost=-/usr/sbin/usb-mode.sh guard ${USB_MODE}
+ExecStartPost=-/bin/sh -c 'i=0; while [ $i -lt 20 ]; do [ -c /dev/ttyGS0 ] && exit 0; i=$((i+1)); sleep 1; done'
+TimeoutStartSec=45
+
+[Install]
+WantedBy=multi-user.target

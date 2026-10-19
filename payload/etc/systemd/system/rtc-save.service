@@ -1,0 +1,22 @@
+[Unit]
+Description=Save system clock to PMIC RTC (rtc-pm8xxx)
+Documentation=file:/usr/sbin/rtc-save.sh
+# 关机/重启前再存一次：DefaultDependencies=no + Before=shutdown.target，
+# service 是 RemainAfterExit=oneshot，所以 shutdown 时会真的执行 ExecStop。
+DefaultDependencies=no
+Conflicts=shutdown.target
+Before=shutdown.target
+After=time-set.target sysinit.target
+Wants=time-set.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/rtc-save.sh
+ExecStop=/usr/sbin/rtc-save.sh
+TimeoutSec=30
+# 失败也不该拖住开机/关机
+SuccessExitStatus=0 1
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,66 @@
+name: lint
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  shell-and-hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: bash -n（所有 .sh）
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            if ! bash -n "$f"; then
+              echo "::error file=$f::bash -n 失败"
+              fail=1
+            fi
+          done < <(git ls-files '*.sh')
+          exit "$fail"
+
+      - name: .sh 必须是 LF（禁止 CRLF）
+        run: |
+          bad=0
+          while IFS= read -r f; do
+            if LC_ALL=C grep -q $'\r' "$f"; then
+              echo "::error file=$f::存在 CRLF 行尾"
+              bad=1
+            fi
+          done < <(git ls-files '*.sh' '*.dts' '*.dtsi')
+          exit "$bad"
+
+      - name: shellcheck（只把 error 当失败）
+        run: |
+          if command -v shellcheck >/dev/null 2>&1; then
+            find . -name '*.sh' -not -path './.git/*' -print0 \
+              | xargs -0 -r shellcheck -S error -e SC1090,SC1091 || true
+          else
+            echo "shellcheck 不可用，跳过"
+          fi
+
+      - name: 敏感信息扫描（密码 / 私钥 / token）
+        run: |
+          if grep -rIn --exclude-dir=.git --exclude-dir=out \
+               -e '11222211' \
+               -e 'BEGIN [A-Z ]*PRIVATE KEY' \
+               -e 'ghp_[A-Za-z0-9]\{20,\}' \
+               -e 'sk-[A-Za-z0-9]\{20,\}' . ; then
+            echo "::error::疑似提交了密码或私钥"
+            exit 1
+          fi
+          echo "ok：未发现敏感信息"
+
+      - name: DTS 片段必须带 marker 注释
+        run: |
+          fail=0
+          for f in dts/*.dtsi; do
+            if ! head -1 "$f" | grep -q '^/\* ===='; then
+              echo "::error file=$f::缺少 '/* ==== <名字>' 首行 marker"
+              fail=1
+            fi
+          done
+          exit "$fail"

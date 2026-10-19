@@ -1,0 +1,23 @@
+[Unit]
+Description=Phone UI (framebuffer GUI for Xiaomi 9 / SM8150)
+After=systemd-user-sessions.service
+# 注意：不要写 Conflicts/After=getty@tty1 —— 实测那样 unit 在开机时根本不会被拉起
+# （journal 里一条记录都没有）。getty 在 tty1 上打一行登录横幅不影响我们，
+# 因为 GUI 每帧全屏重绘 /dev/fb0。
+
+[Service]
+Type=simple
+Environment=PHONEUI_AUTO=0
+Environment=PHONEUI_BRIGHT=1.0
+Environment=HOME=/root
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/root/phoneui
+ExecStart=/usr/bin/python3 /root/phoneui/phoneui.py
+Restart=always
+RestartSec=3
+KillMode=process
+StandardOutput=append:/var/log/phoneui.log
+StandardError=append:/var/log/phoneui.log
+
+[Install]
+WantedBy=multi-user.target

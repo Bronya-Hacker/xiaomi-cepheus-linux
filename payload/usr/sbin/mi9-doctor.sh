@@ -1,0 +1,164 @@
+#!/bin/sh
+# ---------------------------------------------------------------------------
+# mi9-doctor.sh —— 服务器底座自检 / 自愈
+#
+# 谁在跑它：
+#   * mi9-doctor.timer（开机 + 每 15 分钟，systemd 以 root 运行）→ 自愈
+#   * 人工：mi9-doctor           只检查、只报告
+#           mi9-doctor --fix     检查 + 就地修
+#           mi9-doctor --quiet   安静模式（定时器用）
+#
+# 设计原则：
+#   1) **只做能确定安全的事**。每步独立、出错不中断，绝不因为一个检查失败就
+#      把别的东西弄坏（尤其是 SSH —— 它是唯一入口，见 docs/root-cause.md §10.16）。
+#   2) 每次结果追加一行到 /var/log/mi9-health.log（>512K 自动裁到最近 200 行）。
+#   3) 报告用纯 ASCII（会在手机屏幕/串口上看）。
+# ---------------------------------------------------------------------------
+set -u
+
+FIX=0; QUIET=0
+for a in "$@"; do
+	case "$a" in
+		--fix)   FIX=1 ;;
+		--quiet|-q) QUIET=1 ;;
+	esac
+done
+
+LOG=/var/log/mi9-health.log
+BAD=0; FIXED=0
+ok()  { [ "$QUIET" = 1 ] || echo "  [ok]  $*"; }
+bad() { BAD=$(( BAD + 1 )); echo "  [BAD] $*"; }
+fx()  { FIXED=$(( FIXED + 1 )); echo "  [fix] $*"; }
+try_fix() { # try_fix <描述> <命令...>
+	_d="$1"; shift
+	if [ "$FIX" = 1 ]; then
+		if "$@" >/dev/null 2>&1; then fx "$_d"; else bad "$_d (fix failed)"; fi
+	else
+		bad "$_d (run with --fix)"
+	fi
+}
+
+[ "$QUIET" = 1 ] || echo "=== mi9-doctor $(date -Is 2>/dev/null) ==="
+
+# --- 1) 权限：root SSH 的命门（2026-10-19 事故留下的教训）-------------------
+_m=$(stat -c%a /root 2>/dev/null || echo ?); _u=$(stat -c%u /root 2>/dev/null || echo ?)
+if [ "$_m" = "700" ] && [ "$_u" = "0" ]; then
+	ok "/root is 0700 root"
+else
+	bad "/root is $_m owner $_u  (sshd StrictModes will REFUSE root key login!)"
+	[ "$FIX" = 1 ] && { chmod 700 /root 2>/dev/null; chown root:root /root 2>/dev/null; fx "/root -> 0700 root"; }
+fi
+# 注意：只关心 group/other 的写位（0022）；755 / 700 都是合规的。
+# 以前的写法用 case 匹配 "*2|*3|*6|*7|7??"，把 700-799 全判成可写 —— 纯误报。
+for d in /etc /etc/ssh /usr /usr/sbin; do
+	_dm=$(stat -c%a "$d" 2>/dev/null || echo ?)
+	case "$_dm" in
+	[0-7][0-7][0-7])
+		if [ $(( 0$_dm & 0022 )) -ne 0 ]; then
+			bad "$d is $_dm (group/other writable)"
+			[ "$FIX" = 1 ] && { chmod go-w "$d" 2>/dev/null; fx "$d -> go-w"; }
+		else
+			ok "$d is $_dm"
+		fi ;;
+	*) bad "$d perms unreadable ($_dm)" ;;
+	esac
+done
+[ -d /root/.ssh ] && {
+	_sm=$(stat -c%a /root/.ssh 2>/dev/null || echo ?)
+	_am=$(stat -c%a /root/.ssh/authorized_keys 2>/dev/null || echo ?)
+	[ "$_sm" = "700" ] && [ "$_am" = "600" ] && ok "/root/.ssh 0700 + authorized_keys 0600" || bad "/root/.ssh=$_sm authorized_keys=$_am"
+}
+
+# --- 2) SSH 本身（唯一入口，必须活着）---------------------------------------
+if systemctl is-active ssh >/dev/null 2>&1; then ok "sshd active"; else
+	bad "sshd NOT active"
+	try_fix "start ssh" systemctl reset-failed ssh
+	[ "$FIX" = 1 ] && try_fix "start ssh" systemctl start ssh
+fi
+
+# --- 3) 交换 ---------------------------------------------------------------
+if [ -n "$(swapon --show=NAME --noheadings 2>/dev/null)" ]; then ok "swap active: $(swapon --show=NAME,SIZE --noheadings 2>/dev/null | tr -s ' ' | tr '\n' ' ')"; else
+	bad "no swap"
+	try_fix "start zram-swap" systemctl start zram-swap.service
+fi
+
+# --- 4) 看门狗 -------------------------------------------------------------
+_wd=$(systemctl show -p RuntimeWatchdogUSec --value 2>/dev/null || echo 0)
+if [ "$_wd" != "0" ] && [ -n "${_wd:-}" ]; then ok "watchdog $_wd"; else
+	bad "watchdog disabled (system.conf.d/20-watchdog.conf needs [Manager]!)"
+	try_fix "daemon-reexec for watchdog" systemctl daemon-reexec
+fi
+
+# --- 5) 网络 ---------------------------------------------------------------
+_nst=$(nmcli -t -f DEVICE,STATE dev 2>/dev/null | sed -n 's/^wlan0://p')
+if [ "${_nst:-}" = "connected" ]; then
+	_ssid=$(iw dev wlan0 link 2>/dev/null | awk -F': ' '/SSID/{print $2}')
+	ok "wlan0 connected (${_ssid:-?})"
+else
+	bad "wlan0 state='${_nst:-?}'"
+	_prof=$(nmcli -t -f NAME,TYPE con show 2>/dev/null | awk -F: '$2 ~ /wireless/ {print $1; exit}')
+	if [ -n "${_prof:-}" ]; then try_fix "nmcli con up $_prof" nmcli con up "$_prof"; else bad "no wireless profile in NM"; fi
+fi
+_udc=$(cat /sys/class/udc/*/state 2>/dev/null || echo ?)
+_uip=$(ip -o -4 addr show usb0 2>/dev/null | awk '{print $4}')
+[ "$_udc" = "configured" ] && ok "usb gadget configured ($_uip)" || bad "usb gadget state=$_udc (report only, not auto-fixed)"
+
+# --- 6) 磁盘 / 日志 / 温度 --------------------------------------------------
+_dfp=$(df -P / 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')
+if [ -n "${_dfp:-}" ] && [ "$_dfp" -lt 90 ]; then ok "root fs ${_dfp}% used"; else
+	bad "root fs ${_dfp:-?}% used"
+	[ "$FIX" = 1 ] && { journalctl --vacuum-size=256M >/dev/null 2>&1; fx "vacuum journal to 256M"; }
+fi
+_jm=$(du -sk /var/log/journal 2>/dev/null | awk '{print int($1/1024)}')
+if [ -n "${_jm:-}" ] && [ "$_jm" -gt 600 ]; then
+	bad "journal ${_jm}MB > 600MB"
+	[ "$FIX" = 1 ] && { journalctl --vacuum-size=384M >/dev/null 2>&1; fx "vacuum journal -> 384M (was ${_jm}MB)"; }
+else ok "journal ${_jm:-?}MB"; fi
+
+_tmax=0; _tn=?
+for z in /sys/class/thermal/thermal_zone*; do
+	_t=$(cat "$z/temp" 2>/dev/null || echo 0)
+	[ "$_t" -gt "$_tmax" ] 2>/dev/null && { _tmax=$_t; _tn=$(cat "$z/type" 2>/dev/null); }
+done
+_tc=$(( _tmax / 1000 ))
+if [ "$_tc" -lt 85 ]; then ok "temp max ${_tc}C ($_tn)"; else bad "temp max ${_tc}C ($_tn) -- throttling/critical is 90/110C"; fi
+
+# --- 7) 蓝牙（WCN3990 / uart13）-------------------------------------------
+# 只做"活着没"的判断：驱动/固件/供电任何一环断了，hci0 就不会出现或起不来。
+if [ -d /sys/class/bluetooth/hci0 ]; then
+	if command -v hciconfig >/dev/null 2>&1; then
+		if hciconfig hci0 2>/dev/null | grep -q "UP RUNNING"; then
+			_btst="up"
+			ok "bluetooth hci0 up ($(hciconfig hci0 2>/dev/null | awk 'NR==2{print $3}'))"
+		else
+			_btst="down"
+			bad "bluetooth hci0 exists but not UP RUNNING"
+		fi
+	else
+		_btst="no-bluez"
+		ok "bluetooth hci0 present (bluez 未安装，无法查运行态)"
+	fi
+else
+	_btst="absent"
+	bad "bluetooth hci0 missing (uart13 未启用 / 固件缺失 / 刷了旧 boot)"
+fi
+
+# --- 8) 失败单元 -----------------------------------------------------------
+_nf=$(systemctl --failed --no-legend 2>/dev/null | wc -l)
+if [ "$_nf" = "0" ]; then ok "no failed units"; else
+	bad "$_nf failed unit(s): $(systemctl --failed --no-legend 2>/dev/null | awk '{print $1}' | tr '\n' ' ')"
+	[ "$FIX" = 1 ] && { systemctl reset-failed >/dev/null 2>&1; fx "reset-failed"; }
+fi
+
+# --- 9) 记录一行到健康日志（自动裁剪）--------------------------------------
+mkdir -p /var/log 2>/dev/null
+printf '%s bad=%s fixed=%s temp=%sC wifi=%s bt=%s swap=%s disk=%s%% load=%s\n' \
+	"$(date -Is 2>/dev/null)" "$BAD" "$FIXED" "$_tc" "${_nst:-?}" "${_btst:-?}" \
+	"$(swapon --show=SIZE --noheadings 2>/dev/null | tr -d ' \n')" "${_dfp:-?}" \
+	"$(cut -d' ' -f1 /proc/loadavg 2>/dev/null)" >> "$LOG" 2>/dev/null
+if [ -f "$LOG" ] && [ "$(wc -c < "$LOG" 2>/dev/null || echo 0)" -gt 524288 ]; then
+	tail -n 200 "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG" 2>/dev/null
+fi
+
+[ "$QUIET" = 1 ] || echo "=== mi9-doctor: bad=$BAD fixed=$FIXED ==="
+exit 0

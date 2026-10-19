@@ -1,0 +1,32 @@
+--- a/drivers/net/wireless/ath/ath10k/mac.c
++++ b/drivers/net/wireless/ath/ath10k/mac.c
+@@ -15,6 +15,7 @@
+ #include <linux/etherdevice.h>
+ #include <linux/acpi.h>
+ #include <linux/of.h>
++#include <linux/of_net.h>
+ #include <linux/bitfield.h>
+ 
+ #include "hif.h"
+@@ -9991,8 +9992,19 @@
+ 	int ret;
+ 
+ 	if (!is_valid_ether_addr(ar->mac_addr)) {
+-		ath10k_warn(ar, "invalid MAC address; choosing random\n");
+-		eth_random_addr(ar->mac_addr);
++		/* 板级 DTB 里给了 local-mac-address 就用它。
++		 * 上游 ath10k 只认固件给的 MAC，而 WCN3990 固件给的是无效值
++		 * （全 0）→ 每次开机换一个随机 MAC，dmesg 里一条 warn。
++		 */
++		if (!of_get_mac_address(ar->dev->of_node, ar->mac_addr) &&
++		    is_valid_ether_addr(ar->mac_addr)) {
++			ath10k_dbg(ar, ATH10K_DBG_BOOT,
++				   "using MAC address from DT: %pM\n",
++				   ar->mac_addr);
++		} else {
++			ath10k_warn(ar, "invalid MAC address; choosing random\n");
++			eth_random_addr(ar->mac_addr);
++		}
+ 	}
+ 	SET_IEEE80211_PERM_ADDR(ar->hw, ar->mac_addr);
+ 

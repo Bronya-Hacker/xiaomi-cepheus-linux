@@ -1,0 +1,18 @@
+[Unit]
+Description=Bring up WCN3990 WiFi (ADSP + tqftpserv + ath10k_snoc)
+Documentation=file:/usr/sbin/wifi-up.sh
+After=tqftpserv.service
+Wants=tqftpserv.service
+# NM 是主路径：等它起来，wifi-up.sh 里的 nmcli 才有意义（没有 NM 时这行是空操作）
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/wifi-up.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=420
+
+[Install]
+WantedBy=multi-user.target
