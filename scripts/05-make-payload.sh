@@ -157,7 +157,7 @@ fi
 #   + unit），哪天想看画面 `systemctl enable --now phoneui` 就能捡回来。
 mkdir -p "$STAGE/etc/systemd/system/multi-user.target.wants"
 for u in tqftpserv.service wifi-up.service usb-net.service rtc-save.service \
-         mi9-dashboard.service; do
+         mi9-dashboard.service mi9-charge-guard.service; do
 	[ -f "$STAGE/etc/systemd/system/$u" ] && \
 		ln -sf "/etc/systemd/system/$u" "$STAGE/etc/systemd/system/multi-user.target.wants/$u"
 done
@@ -338,6 +338,7 @@ for l in etc/systemd/system/netplan-ovs-cleanup.service \
          etc/systemd/system/getty@tty1.service \
          etc/systemd/system/multi-user.target.wants/rtc-save.service \
          etc/systemd/system/multi-user.target.wants/mi9-dashboard.service \
+         etc/systemd/system/multi-user.target.wants/mi9-charge-guard.service \
          etc/systemd/system/swap.target.wants/zram-swap.service \
          etc/systemd/system/timers.target.wants/rtc-save.timer \
          etc/systemd/system/timers.target.wants/mi9-doctor.timer; do

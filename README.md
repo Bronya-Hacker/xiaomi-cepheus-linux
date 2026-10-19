@@ -150,6 +150,23 @@ ssh root@<ip> reboot
 > `payload/` 改动必须同时 bump `payload/etc/wifi-cfg.ver`，否则设备上的
 > initramfs 会认为"版本没变"而跳过解压。
 
+### 4. 推送到 GitHub
+
+仓库已经初始化好（`main` 分支，含首个提交），只差远端：
+
+```sh
+# Windows 没装 git 的话，用 WSL：
+wsl bash -c 'cd "/mnt/c/Users/MAO/Desktop/小米9移植linux/wifi-bringup" && \
+  git remote add origin git@github.com:<你的账号>/xiaomi-cepheus-linux.git && \
+  git push -u origin main'
+```
+
+推之前建议再跑一次敏感信息扫描：
+
+```sh
+git grep -nIE '11222211|BEGIN [A-Z ]*PRIVATE KEY' || echo clean
+```
+
 ## 关键设计
 
 | 机制 | 为什么 |

@@ -1,0 +1,16 @@
+# /etc/default/mi9-charge-guard -- 小米9 软件限充配置
+#
+# 背景：主线 qcom_smbx（PM8150B）没有暴露"充电截止电压/截止电流"寄存器，
+#       但 status 可写：
+#         Unknown  -> 置 USBIN_SUSPEND_BIT，停止从 USB 取电（电池开始放电）
+#         Charging -> 清掉该位，恢复充电
+#       所以这个守护用"到上限停、回落到下限再充"的方式限充。
+#
+# 窗口：默认 80% 停 / 75% 恢复。想关掉就把 LIMIT 设成 100。
+# 温度：电池 >= MAXTEMP 时无条件停充（安全兜底，独立于窗口）。
+# 周期：INTERVAL 秒检查一次（电量变化很慢，60 秒足够）。
+
+MI9_CHARGE_LIMIT=80
+MI9_CHARGE_RESUME=75
+MI9_CHARGE_MAX_TEMP=45
+MI9_CHARGE_INTERVAL=60

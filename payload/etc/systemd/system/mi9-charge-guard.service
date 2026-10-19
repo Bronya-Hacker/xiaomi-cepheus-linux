@@ -1,0 +1,13 @@
+[Unit]
+Description=Mi9 charge guard (soft 80%% limit + over-temp stop)
+Documentation=file:///usr/local/share/doc/mi9/README.md
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/mi9-charge-guard.sh
+Restart=on-failure
+RestartSec=30s
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

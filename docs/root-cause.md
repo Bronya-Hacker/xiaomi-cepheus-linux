@@ -1568,3 +1568,174 @@ timeout 10 bluetoothctl scan on   # 能列出周围 BLE 设备
   与包内版本**不同**时才解压。所以只改 `payload/` 而不 bump 版本号，
   **设备上永远不会生效**。
 
+### 10.18 ★ 2026-10-19（续）充电与电量：PM8150B charger + fuel gauge，以及"限充"的真实做法
+
+目标：`/sys/class/power_supply` 从空的变成能读电量/电压/电流/温度/状态，
+并且能按 80% 上限停充（长期插电当服务器，满电常挂对电池不友好）。
+
+#### A) 结论：驱动早就在主线里，缺的只是 DT 的 `status`
+
+查 6.17 源码：
+
+| 驱动 | 配置 | compatible | 提供 |
+|---|---|---|---|
+| `drivers/power/supply/qcom_smbx.c` | `CONFIG_CHARGER_QCOM_SMB2=y`（已编入） | `qcom,pm8150b-charger` | `pm8150b-charger`（USB psy） |
+| `drivers/power/supply/qcom_fg.c` | `CONFIG_BATTERY_QCOM_FG=y`（已编入） | `qcom,pm8150b-fg` | `qcom-battery`（电池 psy） |
+
+本机 DTS 本来就 `#include "pm8150b.dtsi"`，所以 `&pm8150b_charger` / `&pm8150b_fg`
+两个 label 直接可用；只是这两个节点在 dtsi 里默认 `status = "disabled"`。
+`pm8150b_adc`（给充电器提供 `usbin_i` / `usbin_v` 两个 IIO 通道）没有 status，
+默认就是 okay —— 所以**不需要动任何寄存器地址、也不需要改内核 config**。
+
+#### B) 新增片段 `dts/cepheus-chg.dtsi`（第 4 部分）
+
+```dts
+/ {
+	battery: battery {
+		compatible = "simple-battery";
+		charge-full-design-microamp-hours = <3300000>;   /* 小米9 3300mAh */
+		voltage-min-design-microvolt = <3400000>;
+		voltage-max-design-microvolt = <4400000>;        /* 原厂 fv-max-uv=0x432380 */
+	};
+};
+
+&pm8150b_fg {
+	status = "okay";
+	monitored-battery = <&battery>;
+	power-supplies = <&pm8150b_charger>;
+};
+
+&pm8150b_charger {
+	status = "okay";
+	monitored-battery = <&battery>;
+};
+```
+
+依据：
+- 原厂 dtbo 的 `qcom,fv-max-uv = 0x432380` = **4 400 000 µV**，与 3300 mAh 电池吻合；
+- 主线 **raphael / nabu / flame** 三块同 SoC 板子的写法完全一样（都是
+  `monitored-battery` + `power-supplies = <&pm8150b_charger>`），照抄即可；
+- `pm8150b_vbus`（OTG 输出）**没开**，因为本机暂不做 USB Host。
+
+#### C) 实测：psy 出现了，数值也对
+
+```text
+$ ls /sys/class/power_supply/
+pm8150b-charger  qcom-battery
+
+pm8150b-charger: type=USB status=Full online=1 current_max=450000 usb_type=Unknown [SDP] DCP CDP
+qcom-battery:    type=Battery status=Not charging capacity=99 voltage_now=4396228
+                 current_now=0 temp=340        # 0.1C -> 34.0C
+```
+
+dmesg 只有一行 `qcom-smbx-charger c440000.spmi:pmic@2:charger@1000: Generation SMB5`，
+没有报错。
+
+两个"看起来奇怪、其实正常"的点：
+
+1. **ICL 只有 450 mA**：因为当时插在 PC 的 USB 口上，APSD 识别为 **SDP**
+   （标准下行端口，上限 500 mA）。插墙充会识别成 DCP，驱动会把 ICL 提到 1.5 A
+   （`DCP_CURRENT_UA`）。写 `current_max` 会被 `smb_status_change_work` 按端口
+   类型再覆盖回去（实测写 2 800 000 后被改回 375 000），**不要指望它突破端口上限**。
+2. **`usb_type` 的格式**是 `Unknown [SDP] DCP CDP`，方括号里才是当前值；
+   仪表盘取方括号内容显示成 `SDP`。
+
+#### D) "限充"的真相：没有截止电压寄存器，但有 `status` 这个开关
+
+`qcom_smbx` 暴露的属性只有
+`MANUFACTURER/MODEL_NAME/CURRENT_MAX/CURRENT_NOW/VOLTAGE_NOW/STATUS/HEALTH/ONLINE/USB_TYPE`，
+**没有** `charge_control_end_threshold` / `constant_charge_voltage`。
+但 `STATUS` 是可写的：
+
+```c
+case POWER_SUPPLY_PROP_STATUS:
+	return regmap_update_bits(chip->regmap, chip->base + USBIN_CMD_IL,
+				  USBIN_SUSPEND_BIT, !val->intval);
+```
+
+即：写 `Unknown`（枚举值 0）→ `!0 = 1` → **置 USBIN_SUSPEND_BIT**，停止从 USB 取电；
+写 `Charging`（1）→ 清位，恢复。实测：
+
+```text
+before:    charger=Full       online=1  batt=Not charging cap=99
+Unknown:   charger=Discharging online=0 batt=Charging  ibat=-234863
+Charging:  charger=Charging   online=1  batt=Discharging ibat=+430175
+```
+
+两个注意点：
+
+1. **USB 数据链路不受影响**：RNDIS/NCM、`ttyGS0` 都还在（整个实验就是通过 USB SSH 做的）。
+2. **停充期间 FG 的 `status` 不可信**：它报 `Charging`，但 `current_now` 是负的。
+   判断"停没停"要看充电器的 `online` 或守护自己的状态文件。
+
+#### E) 守护 `mi9-charge-guard`（窗口 + 过温）
+
+| 文件 | 作用 |
+|---|---|
+| `payload/etc/default/mi9-charge-guard` | 配置：`LIMIT=80` / `RESUME=75` / `MAX_TEMP=45` / `INTERVAL=60` |
+| `payload/usr/sbin/mi9-charge-guard.sh` | 主循环；`--status` / `--stop` / `--resume` 手动模式 |
+| `payload/etc/systemd/system/mi9-charge-guard.service` | `Restart=on-failure`，开机启用 |
+
+> ★ 坑（第一版就踩了）：unit 里**不要**同时写 `After=multi-user.target` 和
+> `WantedBy=multi-user.target` —— 这是排序环，systemd 会直接把启动任务丢掉。
+> 症状极隐蔽：`systemctl is-enabled` 显示 `enabled`，但 `is-active` 是
+> `inactive (dead)`，而且 `journalctl -u` **一条记录都没有**（因为根本没执行）。
+> 去掉 `After=` 之后开机就正常拉起了。
+
+逻辑：
+- 开机先把状态强制恢复成 `Charging`（避免上次停充残留）；
+- `capacity >= LIMIT` → `Unknown`（停）；`capacity <= RESUME` → `Charging`（恢复）；
+- 中间区间保持现状（滞回，避免 79↔80 频繁开关）；
+- `temp >= 45C` → 无条件停充（独立于窗口）；
+- 状态写 `/run/mi9-charge-guard.state`，每次切换 `logger -t mi9-charge-guard` 记一条；
+- 不写 sysfs 时只记日志、不进重启循环。
+
+语义上的取舍：停充后手机**靠电池运行**（不是"插着电但不充"），所以电量会在
+80→75 之间缓慢往返。这是充电阈值型设备的常见行为；如果想改成"插电直供、
+不碰电池"，那需要硬件层面的 power path 控制，主线驱动没暴露。
+
+#### F) 仪表盘与自检
+
+- `mi9-status.sh` 新增 **PWR** 段：
+  ```text
+  PWR -----------------------------------------------------------------
+  batt  99% 4.40V  +430mA 34.0C Charging
+  chg  online=1 icl=450mA SDP  guard=resumed
+  ```
+- `mi9-doctor.sh` 新增第 8 项：电池温度 ≥45 °C 报 BAD、守护没跑就 `--fix` 拉起；
+  健康日志加 `batt=99%/34C` 字段。
+
+#### G) 改动清单
+
+| 文件 | 改动 |
+|---|---|
+| `dts/cepheus-chg.dtsi` | 新增：battery + `&pm8150b_fg` + `&pm8150b_charger` |
+| `scripts/apply-dts4.sh` | 新增：第 4 段幂等 apply（片段变了自动替换） |
+| `scripts/02-build-kernel.sh` | apply 循环加 `apply-dts4.sh`；DTB 门禁加 charger/fg 的 compatible 与 `status=okay` |
+| `scripts/03-build-edk2.sh` | FVMAIN 终检加 `qcom,pm8150b-charger` / `qcom,pm8150b-fg` |
+| `payload/usr/sbin/mi9-charge-guard.sh` | 新增：限充守护 |
+| `payload/etc/default/mi9-charge-guard` | 新增：窗口/温度配置 |
+| `payload/etc/systemd/system/mi9-charge-guard.service` | 新增：开机启用 |
+| `payload/usr/sbin/mi9-status.sh` | 新增 PWR 段与 `volt/amp/tenth` 换算 |
+| `payload/usr/sbin/mi9-doctor.sh` | 新增电池/守护自检 + `batt=` 日志字段 |
+| `scripts/05-make-payload.sh` | 启用列表与软链接校验加 `mi9-charge-guard.service` |
+
+#### H) 验证
+
+```sh
+ls /sys/class/power_supply/                     # pm8150b-charger qcom-battery
+cat /sys/class/power_supply/qcom-battery/{capacity,voltage_now,current_now,temp,status}
+cat /sys/class/power_supply/pm8150b-charger/{online,current_max,usb_type}
+systemctl status mi9-charge-guard --no-pager
+mi9-charge-guard.sh --status
+mi9-charge-guard.sh --stop    && sleep 2 && cat /sys/class/power_supply/pm8150b-charger/online   # 0
+mi9-charge-guard.sh --resume  && sleep 2 && cat /sys/class/power_supply/pm8150b-charger/online   # 1
+journalctl -t mi9-charge-guard -n 20 --no-pager
+```
+
+#### I) 收尾（`srv6`）
+
+payload 改动（新增守护/配置/单元、仪表盘与自检）必须 **bump** 版本号才会在
+设备上解压，本轮为 `2026-10-19-srv6`。DTB 变化只需刷 `boot`，payload 变化只需
+`dd` `kernelfat.img` 到 `sda28` —— 两者互不影响。
+

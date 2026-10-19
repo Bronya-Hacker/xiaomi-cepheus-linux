@@ -504,3 +504,59 @@ timeout 10 bluetoothctl scan on     # 能列出周围 BLE 设备
 | `QCA Failed to request file: qca/crbtfw01.tlv (-2)` | 缺 `firmware-name`，驱动按错误的 rom_ver 拼了文件名 |
 | `Can't init device hci0: Operation not supported (95)` + `bluetoothctl` 报 No default controller | 缺 `local-bd-address`，控制器处于 HCI_UNCONFIGURED |
 
+
+---
+
+## 十、充电与电量（PM8150B，2026-10-19 加入）
+
+### 10.1 一次跑完的检查
+
+```sh
+# 1) 两个 psy 都在
+ls /sys/class/power_supply/                 # pm8150b-charger  qcom-battery
+
+# 2) 数值是否合理
+cat /sys/class/power_supply/qcom-battery/capacity      # 0..100
+cat /sys/class/power_supply/qcom-battery/voltage_now   # ~4 300 000 uV
+cat /sys/class/power_supply/qcom-battery/temp          # 0.1C，如 340 = 34.0C
+cat /sys/class/power_supply/pm8150b-charger/online     # 插电=1
+cat /sys/class/power_supply/pm8150b-charger/usb_type   # 方括号里是当前端口类型
+
+# 3) 驱动真的绑上了
+dmesg | grep -i "qcom-smbx\|qcom-fg"       # Generation SMB5
+
+# 4) 限充守护
+systemctl is-enabled mi9-charge-guard      # enabled
+systemctl is-active  mi9-charge-guard      # active
+/usr/sbin/mi9-charge-guard.sh --status
+
+# 5) 停充/恢复（会真的停止从 USB 取电，但 SSH/RNDIS 不受影响）
+/usr/sbin/mi9-charge-guard.sh --stop
+sleep 2; cat /sys/class/power_supply/pm8150b-charger/online      # 0
+/usr/sbin/mi9-charge-guard.sh --resume
+sleep 2; cat /sys/class/power_supply/pm8150b-charger/online      # 1
+journalctl -t mi9-charge-guard -n 10 --no-pager
+```
+
+### 10.2 判据
+
+| 项 | 合格 |
+|---|---|
+| psy | `pm8150b-charger` + `qcom-battery` 同时存在 |
+| 电量 | `capacity` 在 0..100，且与"用了多久"趋势一致 |
+| 电压 | 3.4–4.4 V（满电 4.39–4.40 V） |
+| 温度 | 20–40 °C 常见；≥45 °C 守护必须停充 |
+| 守护 | `enabled` + `active`，状态文件 `/run/mi9-charge-guard.state` 为 resumed/suspended |
+| 停充 | 写 Unknown 后 `online=0` 且电池电流为负；写 Charging 后恢复为正 |
+
+### 10.3 故障对照
+
+| 现象 | 原因 / 修法 |
+|---|---|
+| `/sys/class/power_supply` 为空 | DTB 没带 `cepheus-chg.dtsi`（`charger@1000` / `fuel-gauge@4000` 不是 okay）→ 重编 DTB 并刷 boot |
+| 只有 `pm8150b-charger`，没有 `qcom-battery` | `&pm8150b_fg` 没开，或 FG probe 失败（看 `dmesg | grep -i fg`） |
+| `charger@1000` probe 报 `Couldn't get usbin_v IIO channel` | `pm8150b_adc` 被关掉了（本机默认是开的） |
+| 插墙充仍是 450/500 mA | 端口被识别成 SDP；换线/换口，或看 `usb_type` 方括号值 |
+| 守护 `enabled` 但 `inactive (dead)`、日志为空 | unit 里同时写了 `After=multi-user.target` 与 `WantedBy=multi-user.target`（排序环）→ 删掉 After |
+| 停充后电量不降 | 电流显示为 0 是因为刚切换，等 10 s 再看 `current_now` |
+| 电池 `status` 显示 Charging 但电流为负 | FG 的状态判断在"输入挂起"时不可信，看 `online` / 守护状态文件 |

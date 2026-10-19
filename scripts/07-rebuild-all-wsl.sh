@@ -39,11 +39,11 @@ echo
 echo "########## 1) 同步 Windows -> WSL（镜像式）##########"
 cd "$WSRC" || exit 1
 if command -v rsync >/dev/null 2>&1; then
-	rsync -a --delete --exclude='/out' "$WSRC/" "$WDST/" && echo "  ok rsync -a --delete (out/ 除外)"
+	rsync -a --delete --exclude='/out' --exclude='/.git' "$WSRC/" "$WDST/" && echo "  ok rsync -a --delete (out/ .git/ 除外)"
 else
 	echo "  (没有 rsync，用 rm -rf payload/ + tar 兜底)"
 	rm -rf "$WDST/payload"
-	tar cf - --exclude=./out . | ( cd "$WDST" && tar xf - )
+	tar cf - --exclude=./out --exclude=./.git . | ( cd "$WDST" && tar xf - )
 fi
 for f in scripts/02-build-kernel.sh scripts/initramfs-init.sh scripts/05-make-payload.sh \
          scripts/06-make-kernelfat.sh payload/usr/sbin/wifi-up.sh payload/etc/wifi-cfg.ver; do

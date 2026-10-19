@@ -23,6 +23,12 @@ W=66
 r()   { [ -r "$1" ] && cat "$1" 2>/dev/null || echo "?"; }
 mhz() { case "${1:-}" in ''|'?') echo "?" ;; *) echo "$(( $1 / 1000 ))MHz" ;; esac; }
 c2f() { case "${1:-}" in ''|'?') echo "?" ;; *) echo "$(( $1 / 1000 )).$(( ($1 % 1000) / 100 ))C" ;; esac; }
+# 电池/充电的单位换算（power_supply 的约定：电压 uV、电流 uA、温度 0.1C）
+volt()  { case "${1:-}" in ''|'?') echo "?" ;; *) printf '%d.%02dV' "$(( $1 / 1000000 ))" "$(( ($1 % 1000000) / 10000 ))" ;; esac; }
+amp()   { case "${1:-}" in ''|'?') echo "?" ;; *) _a=$1
+	if [ "$_a" -lt 0 ]; then _s=-; _a=$(( 0 - _a )); else _s=+; fi
+	echo "${_s}$(( _a / 1000 ))mA" ;; esac; }
+tenth() { case "${1:-}" in ''|'?') echo "?" ;; *) echo "$(( $1 / 10 )).$(( $1 % 10 ))C" ;; esac; }
 sec2h() {
 	_s="${1:-0}"; _d=$(( _s / 86400 )); _h=$(( (_s % 86400) / 3600 )); _m=$(( (_s % 3600) / 60 ))
 	if   [ "$_d" -gt 0 ]; then echo "${_d}d ${_h}h"
@@ -98,6 +104,23 @@ _sw=$(swapon --show=NAME,SIZE,USED --noheadings 2>/dev/null | tr -s ' ' | tr '\n
 [ -n "$_sw" ] && echo "swapdev: $_sw"
 line
 
+echo "PWR -----------------------------------------------------------------"
+_bat=/sys/class/power_supply/qcom-battery
+_chg=/sys/class/power_supply/pm8150b-charger
+if [ -r "$_bat/capacity" ]; then
+	printf 'batt %3s%% %-7s %-8s %-6s %s\n' "$(r "$_bat/capacity")" \
+		"$(volt "$(r "$_bat/voltage_now")")" "$(amp "$(r "$_bat/current_now")")" \
+		"$(tenth "$(r "$_bat/temp")")" "$(r "$_bat/status")"
+	_icl=$(r "$_chg/current_max")
+	case "${_icl:-}" in ''|'?') _icls="?" ;; *) _icls="$(( _icl / 1000 ))mA" ;; esac
+	_ut=$(r "$_chg/usb_type" | awk -F'[][]' '{print $2}')
+	printf 'chg  online=%s icl=%-7s %-4s guard=%s\n' "$(r "$_chg/online")" \
+		"$_icls" "${_ut:-?}" "$(cat /run/mi9-charge-guard.state 2>/dev/null || echo '?')"
+else
+	echo "batt (no qcom-battery -- DTB without cepheus-chg?)"
+fi
+line
+
 echo "DISK ----------------------------------------------------------------"
 df -h / 2>/dev/null | awk 'NR==2{printf "root %-12s %s used / %s (%s)\n", $1, $3, $2, $5}'
 printf 'journal %sMB in /var/log/journal   zram-swap unit %s\n' \
@@ -137,7 +160,7 @@ printf 'failed units %s   temp %sC   disk %s%%   load %s\n' \
 	"$(systemctl --failed --no-legend 2>/dev/null | wc -l)" \
 	"$(( _tmax / 1000 ))" "$(df -P / 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')" \
 	"$(cut -d' ' -f1 /proc/loadavg 2>/dev/null)"
-for u in ssh NetworkManager wpa_supplicant tqftpserv rmtfs mi9-doctor.timer mi9-dashboard; do
+for u in ssh NetworkManager wpa_supplicant tqftpserv rmtfs mi9-doctor.timer mi9-dashboard mi9-charge-guard; do
 	printf '  %-20s %s\n' "$u" "$(scq systemctl is-active "$u")"
 done
 printf 'phoneui(GUI) %s   getty@tty1 %s   phoneui files kept in /root/phoneui\n' \

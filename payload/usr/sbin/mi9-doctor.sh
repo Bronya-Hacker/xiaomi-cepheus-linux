@@ -143,17 +143,40 @@ else
 	bad "bluetooth hci0 missing (uart13 未启用 / 固件缺失 / 刷了旧 boot)"
 fi
 
-# --- 8) 失败单元 -----------------------------------------------------------
+# --- 8) 电池 / 充电 / 限充 --------------------------------------------------
+_bcap=$(cat /sys/class/power_supply/qcom-battery/capacity 2>/dev/null)
+_btmp=$(cat /sys/class/power_supply/qcom-battery/temp 2>/dev/null)
+_bst=$(cat /sys/class/power_supply/qcom-battery/status 2>/dev/null)
+if [ -n "${_bcap:-}" ]; then
+	_bc=$(( ${_btmp:-0} / 10 ))
+	if [ "$_bc" -ge 45 ]; then
+		bad "battery ${_bcap}% ${_bc}C -- too hot (>=45C)"
+	else
+		ok "battery ${_bcap}% ${_bc}C ${_bst:-?}"
+	fi
+	_gst=$(cat /run/mi9-charge-guard.state 2>/dev/null || echo '?')
+	if systemctl is-active mi9-charge-guard >/dev/null 2>&1; then
+		ok "charge guard active (state=$_gst)"
+	else
+		bad "mi9-charge-guard NOT active (limit would not be enforced)"
+		try_fix "start mi9-charge-guard" systemctl start mi9-charge-guard
+	fi
+else
+	bad "no battery psy (DTB without cepheus-chg.dtsi?)"
+fi
+
+# --- 9) 失败单元 -----------------------------------------------------------
 _nf=$(systemctl --failed --no-legend 2>/dev/null | wc -l)
 if [ "$_nf" = "0" ]; then ok "no failed units"; else
 	bad "$_nf failed unit(s): $(systemctl --failed --no-legend 2>/dev/null | awk '{print $1}' | tr '\n' ' ')"
 	[ "$FIX" = 1 ] && { systemctl reset-failed >/dev/null 2>&1; fx "reset-failed"; }
 fi
 
-# --- 9) 记录一行到健康日志（自动裁剪）--------------------------------------
+# --- 10) 记录一行到健康日志（自动裁剪）-------------------------------------
 mkdir -p /var/log 2>/dev/null
-printf '%s bad=%s fixed=%s temp=%sC wifi=%s bt=%s swap=%s disk=%s%% load=%s\n' \
+printf '%s bad=%s fixed=%s temp=%sC wifi=%s bt=%s batt=%s%%/%sC swap=%s disk=%s%% load=%s\n' \
 	"$(date -Is 2>/dev/null)" "$BAD" "$FIXED" "$_tc" "${_nst:-?}" "${_btst:-?}" \
+	"${_bcap:-?}" "$(( ${_btmp:-0} / 10 ))" \
 	"$(swapon --show=SIZE --noheadings 2>/dev/null | tr -d ' \n')" "${_dfp:-?}" \
 	"$(cut -d' ' -f1 /proc/loadavg 2>/dev/null)" >> "$LOG" 2>/dev/null
 if [ -f "$LOG" ] && [ "$(wc -c < "$LOG" 2>/dev/null || echo 0)" -gt 524288 ]; then
