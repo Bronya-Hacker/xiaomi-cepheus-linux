@@ -42,17 +42,23 @@ jobs:
             echo "shellcheck 不可用，跳过"
           fi
 
-      - name: 敏感信息扫描（密码 / 私钥 / token）
+      - name: 敏感信息扫描（真实 WiFi 档案 / 私钥 / token）
         run: |
+          fail=0
+          # 真实 WiFi 档案绝不能被跟踪（仓库只放 *.example）
+          if git ls-files | grep -E '(^|/)\.nmconnection$|wpa_supplicant-[^/]*\.conf$'; then
+            echo "::error::仓库里不应跟踪真实 WiFi 档案（只放 .example）"
+            fail=1
+          fi
           if grep -rIn --exclude-dir=.git --exclude-dir=out \
-               -e '11222211' \
                -e 'BEGIN [A-Z ]*PRIVATE KEY' \
                -e 'ghp_[A-Za-z0-9]\{20,\}' \
                -e 'sk-[A-Za-z0-9]\{20,\}' . ; then
-            echo "::error::疑似提交了密码或私钥"
-            exit 1
+            echo "::error::疑似提交了私钥或 token"
+            fail=1
           fi
-          echo "ok：未发现敏感信息"
+          [ "$fail" = 0 ] && echo "ok：未发现敏感信息"
+          exit "$fail"
 
       - name: DTS 片段必须带 marker 注释
         run: |

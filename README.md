@@ -47,7 +47,7 @@ UEFI (edk2-msm) boot, WiFi + Bluetooth working, no GUI, self-healing systemd uni
 | 启动（UEFI + `Image`） | ✅ | edk2-msm，`fs3:\Image`，`sda28` 有备份可回退 |
 | CPU / 调频 / 温控 | ✅ | 8 核 `cpufreq-qcom-hw`，27 个热区，passive 90/95 °C，critical 110 °C |
 | 存储（UFS） | ✅ | 系统在 `/dev/sda31`（110 G） |
-| WiFi | ✅ 2.4G | `wlan0` 已连；phy 报 2.4G+5G 双频（5G 关联/吞吐待实测） |
+| WiFi | ✅ 2.4G 实测 | `wlan0` 已连，iperf3 **60–72 Mbit/s**；5G 收发正常（自建 AP 在 ch44/ch149 均可被关联）；家里路由器 5G 不回应本机认证（AP 侧问题） |
 | 蓝牙 | ✅ | `hci0 UP RUNNING`，BLE 扫描通过，bluez 开机自启 |
 | USB 网络 / 串口 | ✅ | RNDIS/NCM + `ttyGS0` 控制台 |
 | RTC | ✅ | `rtc-pm8xxx` + nvmem offset，掉电走时正常 |
@@ -167,10 +167,11 @@ wsl bash -c 'cd "/mnt/c/Users/MAO/Desktop/小米9移植linux/wifi-bringup" && \
   git push -u origin main'
 ```
 
-推之前建议再跑一次敏感信息扫描：
+推之前建议再检查一次"真实 WiFi 档案有没有被跟踪"：
 
 ```sh
-git grep -nIE '11222211|BEGIN [A-Z ]*PRIVATE KEY' || echo clean
+git ls-files | grep -E '\.nmconnection$|wpa_supplicant-[^/]*\.conf$' \
+  && echo 'BAD: 真实 WiFi 档案进了仓库' || echo clean
 ```
 
 ## 关键设计

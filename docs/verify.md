@@ -560,3 +560,51 @@ journalctl -t mi9-charge-guard -n 10 --no-pager
 | 守护 `enabled` 但 `inactive (dead)`、日志为空 | unit 里同时写了 `After=multi-user.target` 与 `WantedBy=multi-user.target`（排序环）→ 删掉 After |
 | 停充后电量不降 | 电流显示为 0 是因为刚切换，等 10 s 再看 `current_now` |
 | 电池 `status` 显示 Charging 但电流为负 | FG 的状态判断在"输入挂起"时不可信，看 `online` / 守护状态文件 |
+---
+
+## 十一、WiFi 吞吐与 5G（2026-10-19 加入）
+
+### 11.1 2.4G 吞吐
+
+```sh
+# 设备侧
+iperf3 -s -1 -p 5201 &
+# PC 侧（WSL）
+iperf3 -c 192.168.31.177 -t 10 -P 4      # 上行
+iperf3 -c 192.168.31.177 -t 10 -P 4 -R   # 下行
+```
+
+判据：2.4G / 20 MHz 下 **≥ 50 Mbit/s** 算正常（本机实测 60–72 Mbit/s，PC 也走 WiFi 属共享空口）。
+
+### 11.2 5G 能力（不依赖路由器）
+
+```sh
+nmcli con down 560
+iw phy phy0 interface add ap0 type __ap
+ip link set ap0 address 02:00:71:96:e3:dd
+ip link set ap0 up
+hostapd -B /tmp/hostapd-ch44.conf       # hw_mode=a, channel=44 或 149
+iw dev ap0 info                          # 应显示 type AP + channel 44/149
+# 用另一台设备"定向连接"该 SSID：
+#   Windows: netsh wlan add profile ... ; netsh wlan connect name=<profile>
+pkill hostapd; iw dev ap0 del; nmcli con up 560
+```
+
+判据：ch44 与 ch149 都能被 PC 关联 → 手机 5G 收发正常。
+
+### 11.3 连不上家里 5G 时怎么判断
+
+| 现象 | 判断 |
+|---|---|
+| 手机能扫到 5G（-30~-50 dBm），auth 3 次全超时 | 路由器不回应；看 5G 安全模式 / WiFi6 模式 / MAC 过滤 / band steering |
+| 手机自建 AP 在同一信道能被别的设备连上 | 手机的发射没问题，问题在路由器 |
+| `netsh wlan show networks` 只列出 1 个 SSID | Windows 扫描缓存，**不能**据此判断"扫不到"；改用定向连接 |
+| 自建 AP 在 ch44 起不来 / 立刻 DOWN | 看 `iw reg get`（CN 允许 5150–5250）与 `dmesg | grep -i dfs` |
+
+### 11.4 故障对照
+
+| 现象 | 原因 / 修法 |
+|---|---|
+| 自建 AP 报 `Name not unique on network` | ap0 与 wlan0 用了同一个 MAC，先 `ip link set ap0 address <不同 MAC>` |
+| `netsh` 里 SSID 列表不刷新 | Windows 扫描节流；等 15–30 s 或直接定向连接 |
+| 5G 关联后没有 IP | 自建 AP 没跑 DHCP；测链路用，不必拿 IP |

@@ -1739,3 +1739,77 @@ payload 改动（新增守护/配置/单元、仪表盘与自检）必须 **bump
 设备上解压，本轮为 `2026-10-19-srv6`。DTB 变化只需刷 `boot`，payload 变化只需
 `dd` `kernelfat.img` 到 `sda28` —— 两者互不影响。
 
+
+---
+
+### 10.19 ★ 2026-10-19（续）WiFi 实测：2.4G 吞吐 + 5G 到底能不能用
+
+#### A) 2.4G 吞吐（iperf3，PC ↔ 手机，4 流 10 s）
+
+环境：手机连 AP 的 2.4G（ch7），`MCS15 / 144.4 Mbit/s`，RSSI -41 dBm；
+PC 本身连同一路由器的 5G（2162 Mbit/s）——所以这是"空口共享后的下限值"。
+
+| 方向 | 发送 | 接收 |
+|---|---|---|
+| WSL → 手机 | 66.6 Mbit/s | 60.2 Mbit/s |
+| 手机 → WSL | 72.0 Mbit/s | 62.0 Mbit/s |
+
+结论：2.4G / 20 MHz / 单空间流级别的正常水平（PHY 130–144 Mbit/s，TCP 大约打对折）。
+
+#### B) 5G：手机侧完全正常（关键证据）
+
+用 hostapd 在手机上自建 AP，让 PC 连：
+
+| 手机 AP 信道 | 结果 |
+|---|---|
+| **ch149**（5745 MHz，UNII-3） | AP 起来，PC 直接连上，5 GHz / 149，链路 156 Mbit/s |
+| **ch44**（5220 MHz，UNII-1） | AP 起来，PC 直接连上，RSSI -45 dBm |
+
+> ★ 观测坑（很重要）：`netsh wlan show networks` 有时**只返回当前连接的那一个 SSID**
+> （Windows 扫描缓存/节流）。于是"ch44/ch36 的 AP 扫不到"被我误判成"手机发射坏了"。
+> 可信的做法是**定向连接**：先 `netsh wlan add profile` 导入目标 SSID 的配置，再
+> `netsh wlan connect name=<profile>`；能连上就说明对方在正常发射。
+
+#### C) 连不上 `560_5G` 的真正原因：路由器不回应认证
+
+同一时刻的证据：
+
+| 谁 | 目标 | 结果 |
+|---|---|---|
+| PC（AX211） | `560_5G` BSSID `…:93`，ch44 | **连上**，2162 Mbit/s，RSSI -36 |
+| 手机（WCN3990） | 同一个 BSSID，RSSI **-39** | `authenticate` → 3 次 `send auth` → **timed out** |
+| 手机自建 AP | ch44 | PC 能连上（见上表） |
+
+手机在**同一信道**上既收得到（扫描 -39 dBm）又发得出（自建 AP 可被连接），
+所以**不是手机的射频/驱动/board 文件问题**，而是**路由器选择性地不回应这台手机的认证帧**。
+
+可尝试（都在路由器侧，不涉及手机）：
+1. 5G 安全模式：WPA2-PSK 与 WPA2/WPA3 混合都试一遍（部分路由器对 11ac 客户端只给 WPA2）；
+2. 关掉"WiFi 6 专用 / 仅 AX"之类的开关；
+3. 检查 MAC 过滤 / 家长控制 / 设备黑名单（2.4G 与 5G 可能是两套 ACL）；
+4. 5G 固定到 **149–165**（非 DFS、33 dBm）再试。
+
+#### D) 复现命令
+
+```sh
+# 吞吐（设备当 server）
+iperf3 -s -1 -p 5201 &
+iperf3 -c <设备IP> -t 10 -P 4          # 上行
+iperf3 -c <设备IP> -t 10 -P 4 -R       # 下行
+
+# 手机自建 5G AP（验证发射）
+nmcli con down 560
+iw phy phy0 interface add ap0 type __ap
+ip link set ap0 address 02:00:71:96:e3:dd
+ip link set ap0 up
+hostapd -B /tmp/hostapd-ch44.conf      # hw_mode=a, channel=44|149, ssid=cepheus-ch44
+iw dev ap0 info                        # type AP + channel
+# 收尾
+pkill hostapd; iw dev ap0 del; nmcli con up 560
+```
+
+#### E) 小结
+
+- **2.4G 可用**，实测 60–72 Mbit/s（共享空口的下限）。
+- **5G 硬件/驱动可用**（自建 AP 在 ch44、ch149 都被 PC 成功关联）。
+- **家里这台路由器的 5G 不接这台手机**——待用户改路由器设置后再复测；手机侧没有遗留问题。

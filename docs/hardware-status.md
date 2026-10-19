@@ -14,7 +14,7 @@
 | 触摸 | FTS 驱动 + input 事件 + 手势 | ⚠️ 驱动 probe、`fts` input 节点已注册，但初始化报 `ERROR 800E0007` | 触摸大概率不可用（无 GUI 时影响小） |
 | 音频 | q6asm/q6afe + WCD9385 + 扬声器/听筒/麦克风 + UCM | ❌ 无 soundcard，`q6asm_dai` 仍在 cmdline 黑名单 | 完全无声音 |
 | 蜂窝 | modem 固件 + IPA/rmnet + ModemManager + SIM/通话/短信/数据 | ❌ `remoteproc modem=running`，但无 `/dev/wwan`、无 IPA/rmnet | 完全不可用（暂缓） |
-| WiFi | 2.4G+5G、WPA3、接近线速、挂起恢复 | ✅ 2.4G 已连（`ath10k_snoc`，`-32 dBm`）；phy 报 Band 1/2 | 5G 与吞吐待实测（见 §四） |
+| WiFi | 2.4G+5G、WPA3、接近线速、挂起恢复 | ✅ 2.4G 已连；iperf3 实测 **60–72 Mbit/s**；5G 收发已验证（自建 AP 在 ch44/ch149 均能被 PC 关联） | 家里路由器 5G 不回应本机认证（AP 侧）；未验证 WPA3 / 挂起恢复 |
 | 蓝牙 | BR/EDR + BLE、配对/重连、A2DP/HID、开机自启 | ✅ `hci0 UP RUNNING`、BLE 扫描通过、bluez 开机自启 | A2DP 不可用（无音频子系统）；长稳测试见 §四 |
 | GPS/GNSS | qcom 定位 + gpsd | ❌ 无 | 无 |
 | 电池/充电 | PMIC charger + Type-C(tcpm) + fuel gauge + 快充 + 电量/温度上报 | ✅ `pm8150b-charger` + `qcom-battery`（容量/电压/电流/温度/状态）；软件停充可用 | **无 Type-C 角色/ALT mode、无快充协商、无充电上限硬件寄存器**（用软件停充代替） |
@@ -48,9 +48,9 @@
 
 ## 四、明确的待办（按性价比）
 
-1. **充电策略**：软件停充旋钮已验证（写 `status=Unknown` → `online=0`、电池放电；写回 `Charging` → 恢复）。还需要一个常驻服务做 75%~80% 往返、过温停充。
-2. **WiFi 5G + 吞吐**：`iw phy` 报双频，需实测 5G 关联与 `iperf3` 吞吐。
-3. **蓝牙长稳**：持续扫描 + 控制器反复 off/on，验证不崩。
+1. ~~**充电策略**~~ ✅ 已完成：`mi9-charge-guard`（75%~80% 往返 + 45 °C 停充），开机自启。
+2. ~~**WiFi 5G + 吞吐**~~ ✅ 已测：2.4G 60–72 Mbit/s；5G 收发正常（自建 AP 验证）；家里路由器 5G 不接本机（AP 侧）。
+3. **蓝牙长稳**：30 分钟 soak 进行中（周期 BLE 扫描 + 每 5 轮控制器 off/on）。
 4. 触摸 `800E0007`（想接屏幕再说）。
 5. deep suspend / OTG / 传感器 / 相机 / 音频 / modem：按计划搁置。
 
