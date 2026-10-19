@@ -65,6 +65,19 @@ pick() {
 	[ -n "$best_ip" ] && echo "$best_ip $best_t"
 }
 
+# pick_first <host> <url> <ip...> -> first IP that answers, no latency race
+pick_first() {
+	local host=$1 url=$2 ip t
+	shift 2
+	for ip in "$@"; do
+		t=$(probe "$host" "$ip" "$url") || continue
+		printf '  %-42s %-16s ok %ss\n' "$host" "$ip" "$t" >&2
+		echo "$ip $t"
+		return 0
+	done
+	return 1
+}
+
 echo "== probing github.com =="
 # 20.27.177.113 (Azure HK) answers the fastest but resets the POST that
 # git-receive-pack needs, so this one takes the first IP that answers at all
