@@ -98,9 +98,11 @@ RA=$(pick release-assets.githubusercontent.com \
 [ -z "$RA" ] && RA="185.199.110.133 0"
 RA_IP=${RA%% *}
 
-# uploads.github.com is only used by release uploads; 20.205.243.166 serves it
-# fine even though it stalls on the main site.
-UP_IP=20.205.243.166
+# uploads.github.com is only used by release uploads, and it has its own IP:
+# 20.205.243.161.  Pointing it at the main frontend (20.205.243.166) makes it
+# answer 301 -> https://github.com/repos/... and the upload silently does
+# nothing (curl -X POST does not follow 301).
+UP_IP=20.205.243.161
 
 echo
 echo "github.com            -> $GH_IP"
