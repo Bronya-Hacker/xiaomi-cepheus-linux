@@ -144,3 +144,50 @@ fastboot erase modem
 | L3 全盘 | 线刷包不含 rootfs |
 
 所以这个包 = **L0 + L1 的"离线交付形态"**：即使手机进不了系统（只要还能进 fastboot），也能 3 秒恢复内核和 payload。
+
+## 8. 刷机前选 WiFi（不用在手机上打字）
+
+两种方式，任选：
+
+### A. 打包时嵌入（推荐，刷完自动连）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\10-provision-wifi.ps1
+#   WiFi SSID: 560
+#   WiFi password: ****
+# 会自动：写 NetworkManager 档案 + wpa_supplicant 兜底 + bump payload 版本
+#        + 重建（~3 分钟）+ 重新生成 flash\cepheus-<版本>\
+
+# 非交互：
+powershell -File scripts\10-provision-wifi.ps1 -Ssid "560" -Psk "你的口令"
+# 只改配置不重建：
+powershell -File scripts\10-provision-wifi.ps1 -Ssid "560" -Psk "..." -NoBuild
+```
+
+然后照常 `flash-all.bat`。开机会直接连上指定 WiFi。
+
+- 口令只写进 `payload/.../mi9-wifi.nmconnection`（600 权限），该文件被 `.gitignore` 排除
+- 想固定 2.4G：加 `-Band bg`；默认 `auto`
+- SSID 里的引号/反斜杠会被拒绝（避免 keyfile 转义问题）
+
+### B. 刷完之后用 USB 改（不重建、不重启）
+
+手机在 USB 上永远有 `169.254.42.1` 这个固定地址（NCM gadget），WiFi 挂了也能进：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\11-wifi-usb.ps1 -List
+powershell -ExecutionPolicy Bypass -File scripts\11-wifi-usb.ps1
+#   SSID to connect: 560
+#   password: ****
+```
+
+它会：
+
+1. 通过 USB SSH 连上手机（不需要 WiFi）
+2. 列出可见的 SSID
+3. `nmcli con mod mi9-wifi wifi.ssid/psk` → `nmcli con up mi9-wifi`
+4. 打印新连接和 IP
+
+> 连接档案统一叫 `mi9-wifi`（`wifi-up.sh` 会自动发现它，不再写死 `560`）。
+> 旧版设备上的 `560-wifi.nmconnection` 会在首次开机时自动迁移到
+> `/root/560-wifi.nmconnection.legacy`。

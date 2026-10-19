@@ -1,0 +1,26 @@
+# Mi9 WiFi 连接档案（示例）
+# 复制为 mi9-wifi.nmconnection 并把 psk 改成你的口令，或直接运行：
+#   powershell -ExecutionPolicy Bypass -File scripts\10-provision-wifi.ps1
+[connection]
+id=mi9-wifi
+uuid=9a1d2f43-6b17-4f2e-8c6d-3e5a1b7c9d21
+type=wifi
+autoconnect=true
+autoconnect-priority=20
+autoconnect-retries=0
+
+[wifi]
+mode=infrastructure
+ssid=your-ssid
+cloned-mac-address=02:00:71:96:e3:d6
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=changeme123
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto
+addr-gen-mode=stable-privacy

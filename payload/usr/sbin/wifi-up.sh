@@ -264,7 +264,17 @@ if nm_active; then
 	#   （2026-10-18 实测踩到）。而且**改完权限 NM 不会自动重读**，必须 reload。
 	#   payload 打包时已经是 600，这里是对旧设备/旧解包的兜底。
 	chmod 600 /etc/NetworkManager/system-connections/*.nmconnection 2>/dev/null
-	if ! nmcli -t -f NAME con show 2>/dev/null | grep -qx 560; then
+	# --- 连接档案名不再写死（srv9）：取第一个 WiFi 档案 ---
+	# 迁移：旧版 560-wifi.nmconnection 与新的 mi9-wifi.nmconnection 重复时，挪走旧的
+	if [ -f /etc/NetworkManager/system-connections/560-wifi.nmconnection ] && \
+	   [ -f /etc/NetworkManager/system-connections/mi9-wifi.nmconnection ]; then
+		mv -f /etc/NetworkManager/system-connections/560-wifi.nmconnection \
+		      /root/560-wifi.nmconnection.legacy 2>/dev/null
+		log "迁移：旧档案 560-wifi.nmconnection -> /root/*.legacy"
+		nmcli con reload 2>/dev/null || true
+	fi
+	WIFI_CONN="$(nmcli -t -f NAME,TYPE con show 2>/dev/null | awk -F: '$2=="802-11-wireless"{print $1; exit}')"
+	if [ -z "$WIFI_CONN" ]; then
 		log "NM 里没有 560 档案 → chmod 600 + nmcli con reload"
 		nmcli con reload 2>/dev/null || systemctl reload NetworkManager 2>/dev/null
 	fi
@@ -277,7 +287,7 @@ if nm_active; then
 		log "NM 已自动连上：$(nmcli -t -f GENERAL.CONNECTION dev show wlan0 2>/dev/null)"
 	else
 		log "NM 还没连上，主动 up 一次 560"
-		nmcli con up 560 2>/dev/null || log "!! nmcli con up 560 失败（看 nmcli dev status）"
+		nmcli con up "$WIFI_CONN" 2>/dev/null || log "!! nmcli con up 560 失败（看 nmcli dev status）"
 	fi
 else
 	# 只有"根本没有 NetworkManager"的 rootfs 才走这条路。

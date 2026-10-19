@@ -24,8 +24,8 @@
 | 产物 | 版本 | 校验 |
 |---|---|---|
 | `boot-cepheus.img` | DTB = 4 段（WiFi+BT+充电） | md5 `e8bce1256e63a853e94b3a32c14ea820` / sha256 `0deec99f7d5280805338a97497d9055554c256f951fb0acef8df76ab9f0e887f` |
-| `kernelfat.img` | payload `2026-10-19-srv8` | sha256 `b57bd0601f41b25abf1a2301239ac8d29a62380a3ddc391019173147a86d9767` |
-| 设备 `/root/` 里还有 | `kernelfat-srv5/6/7/8.img`、`sda28-before-srv2.img`、`dtbo-stock.img` | 见设备 `sha256sum` |
+| `kernelfat.img` | payload `2026-10-19-wifi-3c3445-r2` | sha256 `d3f9699c20f06e871db092d58b91790925d7fe25e4cee163748e51e14d38f9d5` |
+| 设备 `/root/` 里还有 | `kernelfat-srv5/6/7/8/9.img`、`sda28-before-srv2.img`、`dtbo-stock.img` | 见设备 `sha256sum` |
 
 ## 2. L1：恢复内核 + payload（最常用）
 

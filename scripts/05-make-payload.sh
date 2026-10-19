@@ -25,7 +25,7 @@
 #   usr/lib/firmware/ath10k/WCN3990/hw1.0/board-2.bin  ← ★ 实测可用那份（26440 B，
 #                                                          md5 38c24167a9ba16150f07a03f4dd68218）
 #   usr/lib/firmware/ath10k/WCN3990/hw1.0/firmware-5.bin ← 60 字节桩，列出 ath10k API 版本
-#   etc/NetworkManager/system-connections/560-wifi.nmconnection ← 2.4G(SSID 560) 自动连
+#   etc/NetworkManager/system-connections/mi9-wifi.nmconnection ← 2.4G(SSID 560) 自动连
 #                                                          （band=bg 锁 2.4G，psk 在内）
 #   etc/systemd/network/25-wlan0.network.unused        ← 只在没有 NM 时由 wifi-up.sh 启用
 #                                                        （有 NM 时它会让 networkd 和 NM 抢 wlan0）
@@ -69,7 +69,7 @@ cp -a "$HERE/payload/." "$STAGE/"
 # --- ★ WiFi 口令不进仓库：仓库里只有 *.example，真实档案被 .gitignore 排除 ----
 #   刚 clone 下来还没有真实档案时用模板兜底（否则整个构建会缺文件），
 #   但必须在日志里说清楚：模板里的 psk 是占位符，设备不会自动连上。
-for p in "etc/NetworkManager/system-connections/560-wifi.nmconnection" \
+for p in "etc/NetworkManager/system-connections/mi9-wifi.nmconnection" \
          "etc/wpa_supplicant/wpa_supplicant-wlan0.conf"; do
 	if [ ! -f "$STAGE/$p" ] && [ -f "$STAGE/$p.example" ]; then
 		cp -a "$STAGE/$p.example" "$STAGE/$p"
@@ -261,7 +261,7 @@ chmod 755 "$STAGE/usr/bin/tqftpserv" \
 
 # ★ NetworkManager 的连接档案**必须是 0600**：tar 会按源文件模式带出 0777，
 #   而 NM 见到 group/world 可读写会**直接拒绝加载**，日志是
-#     keyfile: load: ".../560-wifi.nmconnection": failed to load connection:
+#     keyfile: load: ".../mi9-wifi.nmconnection": failed to load connection:
 #              File permissions (100777) are insecure
 #   后果：`nmcli con show` 里根本没有 560 → 开机永远不会自动连（2026-10-18 实测踩到）。
 #   注意 NM **不会**因为后来权限变好而自动重读，所以打包时就得是 600。
@@ -310,7 +310,7 @@ echo "固件/配置落点自检："
 for f in usr/lib/firmware/qcom/sm8150/wlanmdsp.mbn \
          usr/lib/firmware/ath10k/WCN3990/hw1.0/board-2.bin \
          usr/lib/firmware/ath10k/WCN3990/hw1.0/firmware-5.bin \
-         etc/NetworkManager/system-connections/560-wifi.nmconnection \
+         etc/NetworkManager/system-connections/mi9-wifi.nmconnection \
          etc/systemd/network/25-wlan0.network.unused \
          etc/systemd/system.conf.d/10-timeouts.conf \
          etc/systemd/system/pd-mapper.service.d/10-wait-modem.conf \
@@ -380,11 +380,11 @@ if [ "$_m_root" != "drwx------" ]; then
 fi
 echo "  ✓ 目录权限回归测试通过（/ = 0755，/root = 0700）"
 # ★ NM 档案权限必须是 600（NM 见到 group/world 可写会直接拒绝加载，见 README 坑 28）
-mode=$(stat -c%a "$STAGE/etc/NetworkManager/system-connections/560-wifi.nmconnection" 2>/dev/null)
+mode=$(stat -c%a "$STAGE/etc/NetworkManager/system-connections/mi9-wifi.nmconnection" 2>/dev/null)
 if [ "$mode" = "600" ]; then
-	echo "  ✓ 560-wifi.nmconnection 权限 = 600"
+	echo "  ✓ mi9-wifi.nmconnection 权限 = 600"
 else
-	echo "  ✗ 560-wifi.nmconnection 权限 = $mode（必须是 600，NM 会拒绝加载）"
+	echo "  ✗ mi9-wifi.nmconnection 权限 = $mode（必须是 600，NM 会拒绝加载）"
 	exit 1
 fi
 if [ -e "$STAGE/etc/systemd/network/25-wlan0.network" ]; then
