@@ -392,9 +392,13 @@ PAYLOADVER="$(head -1 "$HERE/payload/etc/wifi-cfg.ver" 2>/dev/null)"
 PAYLOADVER="${PAYLOADVER:-unknown}"
 echo "payload 版本号 : $PAYLOADVER"
 
-# SSH 公钥：手机没键盘，SSH/串口是唯一入口。默认灌两把（本机 .ssh 里那两把）。
-SSHKEY="${SSHKEY:-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILeGRFksPyVOWV4ReDSF4SveUY2ZjVlB69FriC+QjVal mi9-root}"
-SSHKEY2="${SSHKEY2:-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFKwbO84BOPq3mnkqvdxlL8uMURJSdizhYqU9uEEDqyH doubao-remote}"
+# SSH 公钥：手机没键盘，SSH/串口是唯一入口。
+# ★ 默认**不注入**任何公钥 —— 公开镜像不能把构建者自己的 key 写进每个用户的
+#   root/.ssh/authorized_keys（等于给所有刷机的人装了一个后门）。
+#   自己用的时候显式传：
+#     SSHKEY="ssh-ed25519 AAAA... me" SSHKEY2="" wsl bash scripts/07-rebuild-all-wsl.sh
+SSHKEY="${SSHKEY:-}"
+SSHKEY2="${SSHKEY2:-}"
 sed -i "s|@KVER@|$KVER|g; s|@PAYLOADVER@|$PAYLOADVER|g; s|@SSHKEY@|$SSHKEY|g; s|@SSHKEY2@|$SSHKEY2|g" "$IR/init"
 chmod +x "$IR/init" "$IR/sbin/usb-mode.sh"
 # ● USB 通道要塞要用的 applet 全链上：ip/ifconfig/route（配 usb0）、setsid（挂后台
