@@ -113,6 +113,23 @@ postmarketOS 的 `boot.img` + `pmbootstrap` 流程：
 
 ## 快速开始
 
+### 直接下载（不想自己编）
+
+| 包 | 内容 | 用途 |
+|---|---|---|
+| [`flash-2026-10-19-wifi-3c3445-r3`](https://github.com/Bronya-Hacker/xiaomi-cepheus-linux/releases/tag/flash-2026-10-19-wifi-3c3445-r3) | `boot.img` + `recovery.img`（34 MB） | 已有系统，只更新内核 / payload |
+| [`full-2026-10-19-r3`](https://github.com/Bronya-Hacker/xiaomi-cepheus-linux/releases/tag/full-2026-10-19-r3) | 上面两个 + `rootfs.img.tar.zst`（4 GB rootfs） | **空机整机安装**，刷完即用 |
+
+整机包实测：刷入 4 GB rootfs → 首启自动扩容到 110 GB、0 失败单元。
+公开包**不含任何 WiFi 口令**（只有 `*.example` 模板）。
+
+> ⚠️ 旧的 `r2` 包曾把本机 WiFi 口令打进镜像，Release 已删除；如果你下载过，
+> 请改用 `r3`，并建议更换 WiFi 密码。
+
+> ⚠️ 新版 fastboot 会把整个镜像读进内存（10 GB 镜像在 16 GB 机器上会
+> `std::bad_alloc`）。整机包已缩到 4 GB；还是失败的话用 platform-tools 28.x
+> 的 `fastboot`（分块发送，见 `docs/fastboot.md`）。
+
 ### 0. 前置
 
 - 一台已解锁、能进 fastboot 的小米9（`cepheus`）

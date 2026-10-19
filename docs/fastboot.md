@@ -191,3 +191,52 @@ powershell -ExecutionPolicy Bypass -File scripts\11-wifi-usb.ps1
 > 连接档案统一叫 `mi9-wifi`（`wifi-up.sh` 会自动发现它，不再写死 `560`）。
 > 旧版设备上的 `560-wifi.nmconnection` 会在首次开机时自动迁移到
 > `/root/560-wifi.nmconnection.legacy`。
+
+### C. 整机包（空机安装）
+
+Release `full-2026-10-19-r3` 是"空机可装"的完整包：`boot.img` + `recovery.img`
++ `rootfs.img.tar.zst`（4 GB ext4，tar+zstd）。
+
+```powershell
+# 1) 下载 cepheus-full-2026-10-19-r3.zip 和 rootfs.img.tar.zst，解压 zip
+# 2) 把 rootfs.img.tar.zst 放进解压目录
+# 3) 双击 flash-all.bat
+```
+
+脚本等价于：
+
+```
+fastboot flash boot    boot.img
+fastboot flash recovery recovery.img
+fastboot flash userdata rootfs.img
+fastboot continue
+```
+
+首次开机自动扩容到 110 GB、生成 SSH host key；root 密码 `mi9`（强制改密）。
+镜像里**不含任何 WiFi 口令**（只有 `*.example` 模板），需要自己
+`nmcli dev wifi connect "SSID" password "PASS"`。
+
+#### ★ fastboot 内存坑（本机实测）
+
+`platform-tools` 30+ 的 `fastboot flash userdata` 会把**整个镜像读进内存**
+（`ReadFileToString`），10 GB 镜像在 16 GB / 空闲 5.3 GB 的机器上直接：
+
+```
+libc++abi: terminating due to uncaught exception of type std::bad_alloc
+```
+
+4 GB 镜像在空闲提交内存 6.4 GB 时也会失败。两个办法：
+
+1. **用 platform-tools 28.x 的 fastboot**（推荐）
+   ```powershell
+   curl.exe -L -o pt28.zip https://dl.google.com/android/repository/platform-tools_r28.0.2-windows.zip
+   tar -xf pt28.zip
+   .\platform-tools\fastboot.exe flash userdata rootfs.img
+   ```
+   它会自动切成 5 片稀疏镜像发送（每片 ~750 MB），4 GB 只要 ~2.3 分钟，
+   内存占用只有一片的大小。
+
+2. 关掉浏览器等占内存的程序，让空闲提交内存 > 镜像大小的 2 倍。
+
+> 这也是为什么公开镜像从 10 GB 缩到 **4 GB**：既省内存又省下载流量
+> （压缩后 1.01 GiB），首次开机照样自动扩到 110 GB。
