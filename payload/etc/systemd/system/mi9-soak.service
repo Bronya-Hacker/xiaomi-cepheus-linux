@@ -1,0 +1,15 @@
+# ---------------------------------------------------------------------------
+# mi9-soak.service —— 采集一行长稳数据（由 mi9-soak.timer 每小时触发）
+#
+# 输出：/var/log/mi9-soak.csv（只追加；>20000 行自动裁到 10000 行）
+# 取数脚本：/usr/local/sbin/mi9-soak.sh（只读 /proc /sys，不联网）
+# ---------------------------------------------------------------------------
+[Unit]
+Description=Mi9: append one long-run health sample
+Documentation=file:///usr/local/sbin/mi9-soak.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mi9-soak.sh
+Nice=10
+IOSchedulingClass=idle

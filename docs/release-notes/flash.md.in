@@ -1,0 +1,35 @@
+无 GUI 的小包（boot + recovery），payload `@VERSION@`。
+
+**重要：r3 起已清除真实 WiFi 凭据。** 旧的 r2 恢复镜像里嵌有本机 WiFi 口令，该 Release 已删除；如果你下载过 r2，请改用 r3，并建议更换 WiFi 密码。
+
+**内容**
+- `boot.img`：UEFI (edk2-msm) + DTB
+- `recovery.img`：内核 + initramfs + payload（WiFi / 蓝牙 / 充电）
+- 不含任何 WiFi 口令，只有 `*.example` 模板；不注入构建者公钥
+
+**这版有什么**
+- 开机 60 秒自动熄屏（AMOLED 省电），电源键短按开 / 关屏
+- 手机式空闲熄屏：亮屏后 `SCREEN_TIMEOUT` 秒（`/etc/mi9-screen.conf`，默认 60）
+  没有任何输入就自动再黑；按任意键、按音量键、摸一下屏幕都会重新计时。`0` = 关闭
+- 升级 payload 时**不再覆盖本机配置**：WiFi 档案、SSH host key、machine-id、hostname、
+  `authorized_keys` 由 `scripts/payload-protect.list` 保护（升级前抄、解压后放回）
+- `/etc/build-id`：内核 + payload 的联合指纹，`mi9-doctor` 首行会打印，方便确认
+  "这台机器跑的到底是哪次构建"
+- `mi9-doctor` 增加身份行；`mi9-soak` 每小时往 `/var/log/mi9-soak.csv` 记一行
+  长稳数据（温度 / 负载 / 内存 / WiFi 信号 / dmesg 异常增量）
+
+**刷入**（不动 userdata）
+```
+fastboot flash boot boot.img
+fastboot flash recovery recovery.img
+```
+
+**校验**
+```
+@BOOT_SHA@  boot.img
+@RECOVERY_SHA@  recovery.img
+@ZIP_SHA@  @ZIP_FILENAME@   (@ZIP_SIZE@ bytes)
+```
+
+**WiFi**：刷完后用 USB 网口 / 串口进去，执行
+`nmcli dev wifi connect "你的SSID" password "你的密码"`。

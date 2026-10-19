@@ -143,24 +143,31 @@ for dev in $(ls /dev/sd[a-z]* /dev/mmcblk*p* 2>/dev/null); do
 					tar xzf "$PDIR/mods.tar.gz" -C /mnt/root/usr/lib/modules/ 2>/dev/null || _pok=0
 				fi
 				if [ -f "$PDIR/wifi-cfg.tar.gz" ]; then
-					# ★ payload 里的 WiFi 档案是**占位符**（ssid=your-ssid /
-					#   psk=changeme123），直接 tar 解到 / 会把设备上已经配好的
-					#   真实档案盖掉：2026-10-19 r3 升级后设备掉线就是这么来的。
-					#   所以先把"本机配置"抄出来，解压完再放回去。
+					# ★ payload 会覆盖 /etc 下的同名文件，而有些文件属于"本机身份"
+					#   （WiFi 档案、SSH host key、machine-id…）：被 payload 里的
+					#   占位符盖掉就等于丢配置 —— 2026-10-19 r3 升级后设备掉 WiFi
+					#   就是这么来的。清单见 /payload/protect.list
+					#   （源自 scripts/payload-protect.list）：解压前抄出来、解压后放回。
+					_prot="$PDIR/protect.list"
 					_kp=/tmp/payload-keep
+					_kn=0
 					rm -rf "$_kp"
 					mkdir -p "$_kp"
-					for _f in etc/NetworkManager/system-connections/mi9-wifi.nmconnection \
-					          etc/wpa_supplicant/wpa_supplicant-wlan0.conf; do
-						[ -f "/mnt/root/$_f" ] || continue
-						grep -q 'changeme123' "/mnt/root/$_f" 2>/dev/null && continue
-						mkdir -p "$_kp/$(dirname "$_f")"
-						cp -a "/mnt/root/$_f" "$_kp/$_f" 2>/dev/null
-					done
+					if [ -f "$_prot" ]; then
+						while IFS= read -r _pat; do
+							case "$_pat" in ''|'#'*) continue ;; esac
+							for _f in /mnt/root/$_pat; do
+								[ -f "$_f" ] || continue
+								_rel=${_f#/mnt/root/}
+								mkdir -p "$_kp/$(dirname "$_rel")"
+								cp -a "$_f" "$_kp/$_rel" 2>/dev/null && _kn=$(( _kn + 1 ))
+							done
+						done < "$_prot"
+					fi
 					tar xzf "$PDIR/wifi-cfg.tar.gz" -C /mnt/root/ 2>/dev/null || _pok=0
-					if [ -d "$_kp/etc" ]; then
-						cp -a "$_kp/etc/." /mnt/root/etc/ 2>/dev/null && \
-							say "[initramfs] ✓ 本机 WiFi 档案已保留（没被 payload 占位符覆盖）"
+					if [ "$_kn" -gt 0 ]; then
+						cp -a "$_kp/." /mnt/root/ 2>/dev/null && \
+							say "[initramfs] ✓ 本机配置已保留（protect.list 命中 $_kn 个文件）"
 					fi
 					rm -rf "$_kp"
 				fi
@@ -174,6 +181,9 @@ for dev in $(ls /dev/sd[a-z]* /dev/mmcblk*p* 2>/dev/null); do
 			else
 				say "[initramfs] ★ 没找到 payload（内嵌/FAT 都没有）→ 跳过解压"
 			fi
+			# BUILD-ID：内核 + payload 的联合指纹，写进 rootfs，方便回答
+			# "这台机器到底跑的是哪次构建"（mi9-doctor 会显示它）
+			echo "@BUILDID@" > /mnt/root/etc/build-id 2>/dev/null
 			[ "$PDIR" = /mnt/fat ] && umount /mnt/fat 2>/dev/null
 
 			# --- ★ 先清掉会成为"高优先级阴影"的旧模块目录 -------------

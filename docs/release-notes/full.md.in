@@ -1,0 +1,36 @@
+小米9 (cepheus / SM8150) 整机安装包 —— 空机可装，刷完即用。**已实机验证**：4 GB rootfs 刷入后首启自动扩容到 110 GB，0 个失败单元。
+
+**内容**
+- `@ZIP_FILENAME@`：boot.img (UEFI+DTB) + recovery.img (内核+initramfs+payload) + flash-all.bat + README
+- `rootfs.img.tar.zst`：Ubuntu 24.04 服务器根文件系统，ext4 4 GB（tar+zstd 1.01 GiB）
+
+**payload `@VERSION@`**
+- 开机 60 秒后自动熄屏（AMOLED 省电），电源键短按可开 / 关屏，SSH 与串口不受影响
+- 手机式空闲熄屏：亮屏后 60 秒（`/etc/mi9-screen.conf` 的 `SCREEN_TIMEOUT`）无输入自动再黑，
+  任何按键 / 触摸都重新计时；设 `0` 关闭
+- 升级 payload 时**不再覆盖本机配置**（WiFi 档案 / SSH host key / machine-id / hostname /
+  `authorized_keys`，清单见 `scripts/payload-protect.list`）
+- `/etc/build-id` 记录本次构建指纹，`mi9-doctor` 第一行显示
+- 不含任何 WiFi 口令，只带 `*.example` 模板；不注入构建者公钥
+
+**安装**
+1. 下载上面 2 个文件，解压 zip
+2. 把 `rootfs.img.tar.zst` 放进解压目录
+3. 运行 `flash-all.bat`（会清空 userdata）
+
+首次开机 1-2 分钟，自动把 4 GB 文件系统扩展到整个 110 GB 分区，自动生成 SSH host key。root 密码 `mi9`，首次登录强制修改。
+
+**不含任何 WiFi 口令**（旧 r2 镜像曾包含本机 WiFi 凭据，已删除并更换为 r3）。配置自己的 WiFi：
+```
+nmcli dev wifi connect "你的SSID" password "你的密码"
+```
+
+**校验**
+```
+@ROOTFS_SHA@  rootfs.img.tar.zst
+@RECOVERY_SHA@  recovery.img
+@BOOT_SHA@  boot.img
+@ZIP_SHA@  @ZIP_FILENAME@   (@ZIP_SIZE@ bytes)
+```
+
+**注意**：新版 fastboot 会把整个镜像读进内存，空闲内存不足会报 `std::bad_alloc`；可用 platform-tools 28.x 的 fastboot（分块发送，4 GB 约 2.5 分钟）。

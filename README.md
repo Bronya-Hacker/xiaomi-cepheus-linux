@@ -36,7 +36,9 @@ UEFI (edk2-msm) boot, WiFi + Bluetooth working, no GUI, self-healing systemd uni
 - 启动链：ABL → **edk2-msm UEFI** → 从 `sda28`（原 recovery 分区）读 `Image` 启动
 - 系统：Ubuntu 24.04（`sda31`，约 110 GB），内核 `6.17.0-sm8150`
 - 网络：WiFi 2.4G（`ath10k_snoc` + WCN3990）、USB RNDIS/NCM、蓝牙 BLE
-- 运维：SSH、串口控制台（`ttyGS0`）、tty1 只读仪表盘、开机 60 s 熄屏 + 电源键亮屏 + 亮屏后空闲 60 s 自动再熄（`/etc/mi9-screen.conf` 可调）、15 分钟自检自愈、60 s 硬件看门狗、zram swap
+- 运维：SSH、串口控制台（`ttyGS0`）、tty1 只读仪表盘、开机 60 s 熄屏 + 电源键亮屏 + 亮屏后空闲 60 s 自动再熄（`/etc/mi9-screen.conf` 可调）、15 分钟自检自愈、60 s 硬件看门狗、zram swap、每小时长稳采样（`/var/log/mi9-soak.csv`）
+- 版本可追溯：`/etc/build-id` 记录内核 + payload 的联合指纹，`mi9-doctor` 首行打印；升级 payload 时 `scripts/payload-protect.list` 保护本机配置（WiFi / host key / machine-id）
+- 发布：`scripts/11-release.sh` 一条命令出包 + 上传 + 服务端 digest 反证 + 回写文档；`scripts/12-release-verify.sh`（CI 每周）对账线上资产与仓库记录的哈希
 - 电源：`pm8150b-charger` + `qcom-battery`（电量/电压/电流/温度/状态），支持软件停充
 
 **不启用**：GUI、Wayland/X、GPU 加速、音频、相机、蜂窝数据、OTG、传感器。

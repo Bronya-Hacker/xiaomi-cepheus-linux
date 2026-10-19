@@ -40,6 +40,15 @@ try_fix() { # try_fix <描述> <命令...>
 
 [ "$QUIET" = 1 ] || echo "=== mi9-doctor $(date -Is 2>/dev/null) ==="
 
+# --- 0) 身份：这台机器跑的到底是哪次构建 -------------------------------------
+# build-id 由 02-build-kernel.sh 用 (wifi-cfg + mods + init 脚本 + payload 版本号)
+# 揉出来的 12 位哈希，initramfs 每次启动写进 /etc/build-id。
+# 没有它就没法回答"设备上的内核是不是 Release 里那个"（2026-10-20 吃过这个亏）。
+_bid=$(cat /etc/build-id 2>/dev/null || echo unknown)
+_pv=$(cat /etc/wifi-cfg.ver 2>/dev/null || echo unknown)
+_kv=$(uname -r 2>/dev/null || echo unknown)
+[ "$QUIET" = 1 ] || echo "  [id]  build $_bid   payload $_pv   kernel $_kv"
+
 # --- 1) 权限：root SSH 的命门（2026-10-19 事故留下的教训）-------------------
 _m=$(stat -c%a /root 2>/dev/null || echo ?); _u=$(stat -c%u /root 2>/dev/null || echo ?)
 if [ "$_m" = "700" ] && [ "$_u" = "0" ]; then

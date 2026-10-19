@@ -52,6 +52,29 @@ dd if=/dev/sda28 bs=1M count=64 2>/dev/null | sha256sum
 > 只改 payload 时也要 **bump `payload/etc/wifi-cfg.ver`**，否则重启后
 > initramfs 认为"版本没变"，不会重新解压，改了等于没改。
 
+**升级 payload 会保护本机配置**（2026-10-20 起）：initramfs 解包前按
+`scripts/payload-protect.list` 把命中的现有文件抄到 `/tmp`，解完再放回。
+清单里是"每台机器都不一样"的东西：WiFi 档案、`ssh_host_*`、`machine-id`、
+`hostname`、`root/.ssh/authorized_keys`。程序、固件、systemd unit 不在此列
+（那些本来就该随 payload 更新）。
+
+```sh
+# 看这次开机命中了几条（串口/控制台日志里）
+#   [initramfs] ✓ 本机配置已保留（protect.list 命中 N 个文件）
+
+# 认构建：内核 + payload 的联合指纹
+cat /etc/build-id          # 12 位，来自 wifi-cfg/mods/init 脚本/payload 版本号
+mi9-doctor | head -2       # [id] build … payload … kernel …
+```
+
+**长稳数据**：`mi9-soak.timer` 每小时往 `/var/log/mi9-soak.csv` 记一行
+（温度、频率、负载、内存、WiFi 信号、dmesg 异常增量、电量）。攒几天后：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\13-soak-report.ps1
+# 输出 out\soak\mi9-soak.csv 汇总（重启次数、断档、各列 min/avg/max）+ soak.svg
+```
+
 ## 3. L2：恢复配置（`/etc`）
 
 ```sh
@@ -180,14 +203,20 @@ reboot
 
 ## 5. 整机镜像（空机安装 / 整机重装）
 
-公开 Release 里的整机包：`full-2026-10-19-r3`
+> 下面的表格由 `scripts/11-release.sh` 自动重写（`RELEASE-TABLE` 标记之间），
+> 校验由 `scripts/12-release-verify.sh` / CI 对账，**不要手改**。
 
+<!-- BEGIN RELEASE-TABLE -->
 | 文件 | 内容 | 大小 | sha256 |
 |---|---|---|---|
-| `cepheus-full-2026-10-19-r3.zip` | `boot.img` + `recovery.img` + `flash-all.bat` + `README` | 34.2 MB | `11fc6b6dcb28a71d61376569a9ec2ec175842fa0961204b22f961b6fc95fcc5a` |
-| `cepheus-2026-10-19-wifi-3c3445-r3.zip` | 小包（同 boot + recovery） | 34.2 MB | `cb3d594744485b8a851b47312b4f7a75d80455c1d82450e2b50eb395248c18e2` |
+| `cepheus-full-2026-10-19-r3.zip` | `boot.img` + `recovery.img` + `flash-all.bat` + `README` | 34.2 MB | `521212b5a550d06d345affbf8c2bcef4c7163c993982ef629dcc35aae4b5af7d` |
+| `cepheus-2026-10-19-wifi-3c3445-r3.zip` | 小包（同 boot + recovery） | 34.2 MB | `2925ebe2d1a046ada7ec1d14f6514d22747876ec47eaa630dc10bf8be5c9836d` |
 | `rootfs.img.tar.zst` | ext4 rootfs，4 GB（tar+zstd） | 1.01 GiB | `9bad365d77808d02d3534b325f4a1ab9a3799be8ccef7e43bf3f4fc797e4ed48` |
-| ↳ `recovery.img` | payload `2026-10-19-wifi-3c3445-r3.4`（不注入公钥、升级不覆盖本机 WiFi 档案） | 64 MiB | `353bafe2e52197db48d24edd08bbe1ee1a560ca3b48bf64580372fee2697a570` |
+| ↳ `recovery.img` | payload `2026-10-19-wifi-3c3445-r3.5`（不注入公钥、升级不覆盖本机配置） | 64 MiB | `659732f2305931ad8b95a1dd33678a4fa713601a804e9a684536609f147a6f02` |
+| ↳ `boot.img` | UEFI + DTB | 6.5 MiB | `0deec99f7d5280805338a97497d9055554c256f951fb0acef8df76ab9f0e887f` |
+
+Release：`full-2026-10-19-r3` / `flash-2026-10-19-wifi-3c3445-r3`
+<!-- END RELEASE-TABLE -->
 
 刷入：解压 zip，把 `rootfs.img.tar.zst` 放进去，跑 `flash-all.bat`
 （等价于 `fastboot flash boot` / `flash recovery` / `flash userdata`）。

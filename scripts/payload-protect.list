@@ -1,0 +1,17 @@
+# payload 覆盖保护清单（每行一个 glob，相对 rootfs 根；# 开头是注释）
+#
+# initramfs 解 payload（tar -C /）之前，会把这些路径上的**现有文件**抄到
+# /tmp，解压完再放回去。理由：payload 里带的是占位符/默认值，而这些东西
+# 属于"本机身份"，被盖掉就等于丢配置 —— 2026-10-19 r3 升级后设备掉 WiFi
+# 就是吃了这个亏（真档案被 ssid=your-ssid 盖掉）。
+#
+# 加进来的原则：
+#   * 每台机器都不一样（WiFi 口令、SSH host key、machine-id）
+#   * 丢了的后果是"连不上"或"身份变了"，而不是"功能缺失"
+# 不要加程序/固件/unit —— 那些本来就该随 payload 更新。
+etc/NetworkManager/system-connections/*.nmconnection
+etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+etc/ssh/ssh_host_*
+etc/machine-id
+etc/hostname
+root/.ssh/authorized_keys

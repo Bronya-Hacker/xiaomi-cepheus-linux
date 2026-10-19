@@ -183,9 +183,18 @@ for u in tqftpserv.service wifi-up.service usb-net.service rtc-save.service \
 		ln -sf "/etc/systemd/system/$u" "$STAGE/etc/systemd/system/multi-user.target.wants/$u"
 done
 mkdir -p "$STAGE/etc/systemd/system/timers.target.wants"
-for t in rtc-save.timer mi9-doctor.timer mi9-screen-off.timer; do
+for t in rtc-save.timer mi9-doctor.timer mi9-screen-off.timer mi9-soak.timer; do
 	[ -f "$STAGE/etc/systemd/system/$t" ] && \
 		ln -sf "/etc/systemd/system/$t" "$STAGE/etc/systemd/system/timers.target.wants/$t"
+done
+
+# --- 命令入口：文档里一直写 `mi9-doctor` / `mi9-status` / `mi9-snapshot`，---------
+#   但包里只有 *.sh，设备上敲命令是 command not found（2026-10-20 发现）。
+#   这里补不带后缀的符号链接，.sh 仍保留（脚本之间互相调用用的是全名）。
+for s in mi9-doctor mi9-status mi9-snapshot mi9-restore; do
+	if [ -f "$STAGE/usr/sbin/$s.sh" ] && [ ! -e "$STAGE/usr/sbin/$s" ]; then
+		ln -sf "/usr/sbin/$s.sh" "$STAGE/usr/sbin/$s"
+	fi
 done
 
 # --- ★ tty1 的 getty 换成状态仪表盘（2026-10-19 服务器化）--------------------

@@ -1,0 +1,35 @@
+{
+  "payload": "2026-10-19-wifi-3c3445-r3.5",
+  "generated": "2026-10-19T17:41:22Z",
+  "releases": [
+    {
+      "tag": "flash-2026-10-19-wifi-3c3445-r3",
+      "assets": [
+        {
+          "name": "cepheus-2026-10-19-wifi-3c3445-r3.zip",
+          "size": 34210104,
+          "sha256": "2925ebe2d1a046ada7ec1d14f6514d22747876ec47eaa630dc10bf8be5c9836d"
+        }
+      ]
+    },
+    {
+      "tag": "full-2026-10-19-r3",
+      "assets": [
+        {
+          "name": "cepheus-full-2026-10-19-r3.zip",
+          "size": 34211558,
+          "sha256": "521212b5a550d06d345affbf8c2bcef4c7163c993982ef629dcc35aae4b5af7d"
+        },
+        {
+          "name": "rootfs.img.tar.zst",
+          "size": 1089127711,
+          "sha256": "9bad365d77808d02d3534b325f4a1ab9a3799be8ccef7e43bf3f4fc797e4ed48"
+        }
+      ]
+    }
+  ],
+  "images": {
+    "boot.img": "0deec99f7d5280805338a97497d9055554c256f951fb0acef8df76ab9f0e887f",
+    "recovery.img": "659732f2305931ad8b95a1dd33678a4fa713601a804e9a684536609f147a6f02"
+  }
+}

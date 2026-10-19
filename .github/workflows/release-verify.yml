@@ -1,0 +1,26 @@
+name: release-verify
+
+# 线上 Release 资产 ≠ 仓库里记的哈希，是这项目最容易悄悄退化的地方
+# （2026-10-20 就出过"文档写的 r3.3 哈希，线上还是上一版"）。
+# 这里每周对一次账，也支持手动触发。
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"   # 每周一 03:17 UTC
+  push:
+    paths:
+      - "docs/release-manifest.json"
+      - "docs/restore.md"
+      - "scripts/12-release-verify.sh"
+      - ".github/workflows/release-verify.yml"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify published assets against docs/release-manifest.json
+        env:
+          REPO: ${{ github.repository }}
+        run: bash scripts/12-release-verify.sh

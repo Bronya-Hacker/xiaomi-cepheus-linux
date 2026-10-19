@@ -1,0 +1,17 @@
+# ---------------------------------------------------------------------------
+# mi9-soak.timer —— 每小时记一行长稳数据
+#
+# Persistent=true：关机错过的那次开机后补记（uptime 会暴露睡眠/关机）。
+# 数据攒够几天用 scripts/13-soak-report.ps1 拉下来看趋势。
+# ---------------------------------------------------------------------------
+[Unit]
+Description=Mi9: hourly long-run health sample
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+AccuracySec=1min
+Unit=mi9-soak.service
+
+[Install]
+WantedBy=timers.target

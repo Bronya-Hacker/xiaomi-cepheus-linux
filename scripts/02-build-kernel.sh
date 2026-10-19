@@ -386,11 +386,27 @@ else
 	echo "⚠️ 没有 $OUT/wifi-cfg.tar.gz —— 固件/wifi 配置不会随 Image 走，先跑 05-make-payload.sh"
 fi
 
+# ★ 覆盖保护清单（payload 解压前抄、解压后放回，见 initramfs-init.sh）
+if [ -f "$HERE/scripts/payload-protect.list" ]; then
+	cp "$HERE/scripts/payload-protect.list" "$IR/payload/protect.list"
+	echo "内嵌 protect.list ($(grep -cv '^[[:space:]]*\(#\|$\)' "$IR/payload/protect.list") 条规则)"
+fi
+
 # payload 版本号：payload/etc/wifi-cfg.ver 里那行。initramfs 拿它与 rootfs 上
 # 的 /etc/wifi-cfg.ver 比较，一样就跳过解压（避免每次开机都把 rootfs 冲一遍）。
 PAYLOADVER="$(head -1 "$HERE/payload/etc/wifi-cfg.ver" 2>/dev/null)"
 PAYLOADVER="${PAYLOADVER:-unknown}"
 echo "payload 版本号 : $PAYLOADVER"
+
+# BUILD-ID：把本次构建的"输入"揉成一个短哈希 —— 内核 Image 是由 initramfs
+# 决定的，而 initramfs 由 payload + init 脚本决定，所以这四样就够定位。
+# 它会被写进 rootfs 的 /etc/build-id（见 initramfs-init.sh），mi9-doctor 显示。
+BUILDID=$( { sha256sum "$OUT/wifi-cfg.tar.gz" "$OUT/mods.tar.gz" \
+                      "$HERE/scripts/initramfs-init.sh" \
+                      "$HERE/payload/etc/wifi-cfg.ver" 2>/dev/null || true; } \
+           | sha256sum | cut -c1-12 )
+BUILDID="${BUILDID:-unknown}"
+echo "build id       : $BUILDID"
 
 # SSH 公钥：手机没键盘，SSH/串口是唯一入口。
 # ★ 默认**不注入**任何公钥 —— 公开镜像不能把构建者自己的 key 写进每个用户的
@@ -399,7 +415,7 @@ echo "payload 版本号 : $PAYLOADVER"
 #     SSHKEY="ssh-ed25519 AAAA... me" SSHKEY2="" wsl bash scripts/07-rebuild-all-wsl.sh
 SSHKEY="${SSHKEY:-}"
 SSHKEY2="${SSHKEY2:-}"
-sed -i "s|@KVER@|$KVER|g; s|@PAYLOADVER@|$PAYLOADVER|g; s|@SSHKEY@|$SSHKEY|g; s|@SSHKEY2@|$SSHKEY2|g" "$IR/init"
+sed -i "s|@KVER@|$KVER|g; s|@PAYLOADVER@|$PAYLOADVER|g; s|@BUILDID@|$BUILDID|g; s|@SSHKEY@|$SSHKEY|g; s|@SSHKEY2@|$SSHKEY2|g" "$IR/init"
 chmod +x "$IR/init" "$IR/sbin/usb-mode.sh"
 # ● USB 通道要塞要用的 applet 全链上：ip/ifconfig/route（配 usb0）、setsid（挂后台
 #   shell）、printf/sed/awk/cut/head（usb-mode.sh 里用得到）
