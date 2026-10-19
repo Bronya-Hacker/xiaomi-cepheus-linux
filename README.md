@@ -7,6 +7,7 @@ UEFI (edk2-msm) boot, WiFi + Bluetooth working, no GUI, self-healing systemd uni
 ![kernel](https://img.shields.io/badge/kernel-6.17--sm8150-blue)
 ![rootfs](https://img.shields.io/badge/rootfs-Ubuntu%2024.04-orange)
 ![boot](https://img.shields.io/badge/boot-edk2--msm%20UEFI-purple)
+[![lint](https://github.com/Bronya-Hacker/xiaomi-cepheus-linux/actions/workflows/lint.yml/badge.svg)](https://github.com/Bronya-Hacker/xiaomi-cepheus-linux/actions/workflows/lint.yml)
 
 > 这是一个**个人实测项目**，不是官方发行版。所有结论都有设备上的证据；
 > 没验证过的地方会明确标注"未验证"。刷机有变砖风险，风险自负。
