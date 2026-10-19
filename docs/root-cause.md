@@ -1848,3 +1848,45 @@ pkill hostapd; iw dev ap0 del; nmcli con up 560
 nohup /root/bt-soak.sh >/dev/null 2>&1 &
 tail -f /var/log/bt-soak.log
 ```
+### 10.21 — 2026-10-19：5G 关联失败 + 80 MHz 下加密吞吐塌陷
+
+**现象**：2.4G(`560`) 正常；5G(`560_5G`) 一直 `authentication ... timed out`（dmesg 里
+`send auth 1/3..3/3` 后超时）。PC 连同一个 BSSID `a4:a9:30:c3:5b:93` 正常。
+
+**排除项**（都实测过）：
+
+| 假设 | 实验 | 结果 |
+|---|---|---|
+| MAC 过滤 | 换随机 MAC 连 5G | 同样超时 → 排除 |
+| 加密方式 | AP 改成开放 | 仍然超时 → 排除 |
+| 信号弱 | `iw scan` | -39 dBm → 排除 |
+| AP 坏 | PC 连同一 BSSID | 正常 → 排除 |
+
+**根因**：AP 的 5G 被配成 **80+80 / 160 MHz**（beacon: `VHT center freq segment 1=42`、
+`segment 2=50`，主信道 44，160 MHz 跨到 DFS 52–64）。QCA6174 + mainline ath10k 在
+80+80 AP 上能收到 beacon（RX 正常），但 **auth 帧被发到错误的中心频点**，AP 收不到。
+**把 AP 改成 80 MHz 后立即关联成功**。
+
+**关联成功后的第二个问题**：80 MHz + 加密帧吞吐只有 23–26 Mbit/s。
+
+| 组合 | 结果 |
+|---|---|
+| 5G · 开放 · 80 MHz（局域网 iperf3） | 354 / 287 Mbit/s |
+| 5G · WPA2 · 80 MHz | 23 / 53 Mbit/s |
+| 5G · WPA3-SAE · 80 MHz | 23 Mbit/s |
+| 5G · WPA2 · 80 MHz · 外网下载 | 44 Mbit/s（同一时刻 PC 204 Mbit/s） |
+| 5G · WPA2 · 80 MHz · UDP 200M | 26 Mbit/s，**丢包 84%** |
+| 2.4G · WPA2 · 40 MHz | **125–130 Mbit/s** |
+
+- 接口计数 `errors 0 / dropped 0` → 丢在空口，不是本机解密
+- 换 SAE 无变化 → 不是 WPA2/WPA3 混合模式
+- 开放网络 80 MHz 正常 → 不是射频/校准
+- 试过 `ath10k_core.cryptmode=1`（软件加密）：固件不支持 raw mode，
+  probe 报 `fatal problem with firmware features: -22`，wlan0 消失 → 不可用，已恢复默认
+
+**结论**：这版 `htt-ver 3.70` 固件在 **80 MHz + 加密** 组合下有吞吐硬伤，与 2.4G 无关。
+服务器链接最终用 2.4G（125–130 Mbit/s）；`560_5G` 档案保留，但
+`autoconnect-priority=10`（低于 2.4G 的 20），只作兜底。
+
+**复现**：`nmcli dev wifi connect 560_5G` → `iw dev wlan0 link` →
+`iperf3 -c <peer> -u -b 200M`；AP 侧把带宽从 160 改 80 是关联成功的关键。
