@@ -23,3 +23,6 @@ desktop.ini
 
 # 黄金镜像备份（大文件，留在本地）
 backups/
+
+# fastboot 线刷包产物（70 MB，本地生成）
+flash/

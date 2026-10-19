@@ -106,6 +106,7 @@ postmarketOS 的 `boot.img` + `pmbootstrap` 流程：
 │   ├── verify.md              # 验收清单与故障对照表
 │   ├── hardware-status.md     # 硬件支持现状对照
 │   ├── restore.md             # 还原点与恢复手册
+│   ├── fastboot.md            # 一键 fastboot 线刷包
 │   └── guide.md               # 长篇构建/踩坑指南（原 README）
 └── .github/workflows/lint.yml # CI：bash -n、CRLF、敏感信息、DTS marker
 ```
@@ -196,6 +197,7 @@ git ls-files | grep -E '\.nmconnection$|wpa_supplicant-[^/]*\.conf$' \
 | [`docs/verify.md`](docs/verify.md) | 分模块验收清单 + "现象 → 原因 → 修法"对照表 |
 | [`docs/hardware-status.md`](docs/hardware-status.md) | 硬件支持现状 vs 成熟移植 |
 | [`docs/restore.md`](docs/restore.md) | 还原点与恢复手册（L0 引导 / L1 系统 / L2 配置 / L3 全盘） |
+| [`docs/fastboot.md`](docs/fastboot.md) | 一键 fastboot 线刷包（boot + recovery，实测 3 秒刷完） |
 | [`docs/guide.md`](docs/guide.md) | 长篇构建指南与历史记录 |
 
 ## 固件与第三方组件
