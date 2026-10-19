@@ -117,13 +117,19 @@ postmarketOS 的 `boot.img` + `pmbootstrap` 流程：
 - 内核树 `~/build/linux`（6.17 系）、`edk2-msm` 树、`mkbootimg`、`clang`/`lld`
 - **不要** `fastboot erase dtbo` / `erase vbmeta`
 
-### 1. 改 IP / WiFi
+### 1. 配置 WiFi（口令不进仓库）
+
+仓库里只有模板，真实档案被 `.gitignore` 排除（避免把自家密码推到 GitHub）：
 
 ```sh
-# payload/etc/NetworkManager/system-connections/560-wifi.nmconnection
-ssid=你的SSID
-psk=你的密码
+cd wifi-bringup
+cp payload/etc/NetworkManager/system-connections/560-wifi.nmconnection{.example,}
+cp payload/etc/wpa_supplicant/wpa_supplicant-wlan0.conf{.example,}
+# 然后编辑这两个文件里的 ssid= 与 psk=
 ```
+
+> 没有真实档案时 `05-make-payload.sh` 会用 `.example` 兜底并在日志里警告，
+> 但模板里的 psk 是占位符，设备不会自动连上。
 
 ### 2. 全量重建（Windows 侧）
 

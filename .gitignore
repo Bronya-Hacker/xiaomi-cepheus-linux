@@ -8,6 +8,12 @@ out/
 # 893528 字节的原厂 board-2.bin 仅作备查（运行用的是 payload 里 26440 字节那份）
 extras/board-2.bin.xiaomi-vendor-*
 
+# ---- 真实 WiFi 口令：仓库只放 .example，真实档案留在本地 ----
+payload/etc/NetworkManager/system-connections/*.nmconnection
+!payload/etc/NetworkManager/system-connections/*.example
+payload/etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+!payload/etc/wpa_supplicant/*.example
+
 # ---- 编辑器/系统垃圾 ----
 .vscode/
 .idea/

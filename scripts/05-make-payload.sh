@@ -66,6 +66,17 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE"
 cp -a "$HERE/payload/." "$STAGE/"
 
+# --- ★ WiFi 口令不进仓库：仓库里只有 *.example，真实档案被 .gitignore 排除 ----
+#   刚 clone 下来还没有真实档案时用模板兜底（否则整个构建会缺文件），
+#   但必须在日志里说清楚：模板里的 psk 是占位符，设备不会自动连上。
+for p in "etc/NetworkManager/system-connections/560-wifi.nmconnection" \
+         "etc/wpa_supplicant/wpa_supplicant-wlan0.conf"; do
+	if [ ! -f "$STAGE/$p" ] && [ -f "$STAGE/$p.example" ]; then
+		cp -a "$STAGE/$p.example" "$STAGE/$p"
+		echo "⚠️ 缺少 $p，已用 .example 兜底（psk 是占位符，设备不会自动连 WiFi）"
+	fi
+done
+
 # --- ★ 归一化：把 payload 里的 lib/ 并进 usr/lib/，并从包里彻底去掉 lib/ ---
 # 原因见文件头：Ubuntu 的 /lib 是 → usr/lib 的符号链接，包里有 ./lib/ 目录项
 # 就会把符号链接顶掉，整机 userland 报废。
