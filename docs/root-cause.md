@@ -1890,3 +1890,62 @@ tail -f /var/log/bt-soak.log
 
 **复现**：`nmcli dev wifi connect 560_5G` → `iw dev wlan0 link` →
 `iperf3 -c <peer> -u -b 200M`；AP 侧把带宽从 160 改 80 是关联成功的关键。
+
+### 10.22 — 2026-10-20：VHT80 塌陷的根因是 PMF（802.11w），不是加密也不是 A-MSDU
+
+10.21 把"80 MHz + 加密 → 23 Mbit/s"归因为固件加密路径；当天用同一 AP、同一口令、
+同一 iperf3 对端做了隔离，结论要改：**开关是 PMF（802.11w 受保护管理帧）**。
+
+**隔离实验**（AP `560_5G`、ch44、80 MHz、CCMP；设备 `WCN3990` + `htt 3.70`）：
+
+| 组合 | 关联 | PHY | TCP 下行 | TCP 上行 |
+|---|---|---|---|---|
+| 2.4G · 40 MHz · VHT · WPA2 · 无 PMF | 正常 | MCS9 192 | 142–145 | – |
+| 5G · 80 MHz · VHT80 · WPA2 · **PMF 强制**（`ieee80211w=2`） | 正常 | MCS7 650 | **19–24** | 48 |
+| 5G · 80 MHz · VHT80 · WPA2 · **无 PMF**（`ieee80211w=0`） | 正常 | MCS7 650 | **255** | **232** |
+| 5G · 80 MHz · VHT80 · WPA3-SAE（=PMF 强制，NetworkManager 默认） | 正常 | MCS7 650 | **20** | 48 |
+
+同一条链路、同一分钟，只把 PMF 关掉，吞吐从 19 变 255；UDP 200M 那组在 PMF 下
+丢 86%。PHY 速率两种情况下都是 MCS7 650 Mbit/s —— 所以不是射频、不是加密算法、
+不是频段，是聚合在受保护管理帧下塌了（ADDBA 这类 action frame 被 PMF 保护后，
+固件处理成近乎逐包）。
+
+**中途的误判（留档）**：先试了 `disable_max_amsdu=1`，得到 304 Mbit/s，一度以为
+是 A-MSDU。实际那几次快测用的都是 **WPA2 无 PMF**，慢测用的都是 SAE/PMF —— 变量
+一直是 PMF，A-MSDU 只是伴随项。驱动侧清 `IEEE80211_HT_CAP_MAX_AMSDU` 的补丁
+（曾编号 0009）经实测**无效**，已撤回。
+
+**为什么 NetworkManager 会自动踩坑**：AP 是 WPA2/WPA3 过渡模式，NM 会优先用
+SAE 并强制 PMF（supplicant 里 `key_mgmt=SAE`, `ieee80211w=2`）；profile 里写
+`key-mgmt=wpa-psk` 也压不住（NM 1.46 仍选 SAE）。`pmf=1` 会让 5G 激活失败。
+
+**可用方案（二选一）**：
+
+1. **推荐：把 AP 的 5G 改成 WPA2-PSK（关掉 WPA3 过渡 / PMF）**。NM 随即走
+   WPA2，实测 250+ Mbit/s，什么都不用改。
+2. 不动路由器：用一份 **`ieee80211w=0` 的 wpa_supplicant 配置**连 5G（绕过 NM）：
+
+   ```ini
+   network={
+       ssid="560_5G"
+       psk="..."
+       key_mgmt=WPA-PSK
+       ieee80211w=0
+   }
+   ```
+
+   实测 255/232 Mbit/s；代价是不能和 NM 同时管 wlan0。
+
+**复现**：
+
+```sh
+# 慢（PMF 强制）
+wpa_supplicant -i wlan0 -c <(printf 'network={ssid="560_5G"\npsk="***"\nieee80211w=2\n}')
+iperf3 -c <peer> -t 8            # ~20 Mbit/s
+# 快（关 PMF）
+sed -i 's/ieee80211w=2/ieee80211w=0/' ...; iperf3 -c <peer> -t 8   # ~255 Mbit/s
+```
+
+**遗留**：根因在固件的 PMF/聚合路径，驱动侧没有开关可关；要彻底解决得等更新固件
+（`WLAN.HL.3.0.c2-00350` 之后）或 QCA 修。当前服务器仍以 2.4G 为主链路，
+5G 作为"AP 改 WPA2 后"的高速选项。
