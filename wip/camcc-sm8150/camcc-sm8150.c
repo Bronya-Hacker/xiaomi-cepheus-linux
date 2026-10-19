@@ -2150,6 +2150,14 @@ static const struct of_device_id cam_cc_sm8150_match_table[] = {
 };
 MODULE_DEVICE_TABLE(of, cam_cc_sm8150_match_table);
 
+/*
+ * 分步探针：stage=0 是正常完整流程；1..5 用来在真机上逐步定位"哪一步锁死总线"。
+ * 每步都先 pr_info，串口/dmesg 能看到走到哪里。
+ */
+static int stage;
+module_param(stage, int, 0644);
+MODULE_PARM_DESC(stage, "0=full probe, 1..5=stop before that step (bring-up)");
+
 static int cam_cc_sm8150_probe(struct platform_device *pdev)
 {
 	struct regmap *regmap;
@@ -2160,7 +2168,8 @@ static int cam_cc_sm8150_probe(struct platform_device *pdev)
 	const struct alpha_pll_config *cfg3 = &cam_cc_pll3_config;
 	const struct alpha_pll_config *cfg4 = &cam_cc_pll4_config;
 
-	/* cepheus 是 SM8150 V2：主线节点名和下游 -v2 名都按 V2 的 PLL/频表走 */
+	dev_info(&pdev->dev, "camcc: probe start (stage=%d)\n", stage);
+
 	if (of_device_is_compatible(pdev->dev.of_node, "qcom,camcc-sm8150-v2") ||
 	    of_device_is_compatible(pdev->dev.of_node, "qcom,sm8150-camcc")) {
 		cfg0 = &cam_cc_pll0_config_sm8150_v2;
@@ -2172,38 +2181,48 @@ static int cam_cc_sm8150_probe(struct platform_device *pdev)
 		cam_cc_ipe_0_clk_src.freq_tbl = ftbl_cam_cc_ipe_0_clk_src_sm8150_v2;
 	}
 
-	/*
-	 * ★ 必须先打开 CAMERA AHB 时钟再碰 camcc 寄存器。
-	 * 2026-10-20 第一次上机就是漏了这一步：没有 AHB 时钟就去写 PLL 寄存器，
-	 * NoC 直接挂死，连 USB gadget 都没建起来（只能 fastboot 救）。
-	 */
+	if (stage == 1)
+		return -EAGAIN;
+
 	ahb = devm_clk_get(&pdev->dev, "cfg_ahb");
-	if (PTR_ERR(ahb) == -ENOENT) {
-		/*
-		 * 主线 sm8150.dtsi 的 camcc 节点只有 clocks 列表、没有 clock-names，
-		 * 所以按名字取不到。第二个 clocks 就是 GCC_CAMERA_AHB_CLK。
-		 */
+	if (PTR_ERR(ahb) == -ENOENT)
 		ahb = of_clk_get(pdev->dev.of_node, 1);
-	}
 	if (IS_ERR(ahb)) {
-		dev_err(&pdev->dev, "no cfg_ahb clock (%ld)\n", PTR_ERR(ahb));
+		dev_err(&pdev->dev, "camcc: no cfg_ahb (%ld)\n", PTR_ERR(ahb));
 		return PTR_ERR(ahb);
 	}
 	ret = clk_prepare_enable(ahb);
 	if (ret)
 		return ret;
+	dev_info(&pdev->dev, "camcc: cfg_ahb on (%lu Hz)\n", clk_get_rate(ahb));
+
+	if (stage == 2)
+		return -EAGAIN;
 
 	regmap = qcom_cc_map(pdev, &cam_cc_sm8150_desc);
 	if (IS_ERR(regmap)) {
 		clk_disable_unprepare(ahb);
 		return PTR_ERR(regmap);
 	}
+	dev_info(&pdev->dev, "camcc: regmap ready\n");
+
+	if (stage == 3)
+		return -EAGAIN;
 
 	clk_trion_pll_configure(&cam_cc_pll0, regmap, cfg0);
+	dev_info(&pdev->dev, "camcc: pll0 configured\n");
+
+	if (stage == 4)
+		return -EAGAIN;
+
 	clk_trion_pll_configure(&cam_cc_pll1, regmap, cfg1);
 	clk_regera_pll_configure(&cam_cc_pll2, regmap, &cam_cc_pll2_config);
 	clk_trion_pll_configure(&cam_cc_pll3, regmap, cfg3);
 	clk_trion_pll_configure(&cam_cc_pll4, regmap, cfg4);
+	dev_info(&pdev->dev, "camcc: all plls configured\n");
+
+	if (stage == 5)
+		return -EAGAIN;
 
 	return qcom_cc_really_probe(&pdev->dev, &cam_cc_sm8150_desc, regmap);
 }

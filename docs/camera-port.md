@@ -167,3 +167,29 @@ clock-names = "iface", "bi_tcxo", "bi_tcxo_ao", "sleep_clk";
 **下一步不再是猜**：先写一个只 `ioremap + readl(0xad00000)` 的最小模块（不写、不注册），
 在串口盯着的情况下 insmod，确认"读"这一层安不安全；再逐段加写操作。每次只前进一步，
 且每次都能用 fastboot 退回。
+
+### 8.5 第三次：模块树被实验版本污染
+
+删掉 `camcc_sm8150.ko` 再重启，机器仍然"USB 能 ping、sshd 不启动、串口只停在 login"。
+用 fastboot 重新刷同一份 r3.5 镜像又立刻恢复正常 —— 说明问题不在内核，而在 rootfs
+里的**模块树与内核不匹配**：
+
+- 实验期间刷过 r3.9 / r3.10 的内核，initramfs 把对应 `mods.tar.gz` 解进了 rootfs；
+- 再刷回 r3.5 时，因为 `/etc/wifi-cfg.ver` 也是 r3.5，initramfs **判定版本相同、跳过解压**，
+  于是 r3.5 的内核配着 r3.10 的模块跑（`depmod` 也会按新树重写），某些模块加载失败/行为异常，
+  启动链卡在中间。
+
+**规矩补一条**：实验内核和 payload 必须**成对**回滚。要么刷回旧镜像时同时删掉
+`/etc/wifi-cfg.ver` 强制重解压，要么把 payload 版本一起改，不能只换内核。
+
+### 8.6 已经拿到的确定性结论（下次接着用）
+
+| 结论 | 证据 |
+|---|---|
+| camcc 的 MMIO **读**是安全的 | `camcc-touch` 读 `0xad00000..0x0c` → 0,0,0,1，整机无恙 |
+| camcc 的 MMIO **单次写**是安全的 | 写 `0xad0000c=1` 读回 1，整机无恙 |
+| 锁死发生在驱动的**后续序列**里 | 完整 probe 两次 wedge，但读/写本身都没事 |
+| `stage=` 分步探针已经就绪 | `wip/camcc-sm8150/camcc-sm8150.c` 里 stage 1..5，可在真机上逐段停 |
+
+下次的下一步：`insmod camcc-sm8150.ko stage=4`（只配 PLL0），串口盯着；若锁死，
+对照 vendor 的 `cam_cc_pll0_config_sm8150_v2` 逐字段核。**务必用备用机做。**
