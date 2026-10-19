@@ -134,3 +134,44 @@ sha256sum /root/kernelfat-srv7.img
 - 不要 `fastboot erase` 任何分区。
 - 不要把 `kernelfat.img` 写到 `sda28` 以外的分区（尤其 `sda31`）。
 - 恢复 `/etc` 后如果不 reboot，systemd 仍用旧配置（容易误判"恢复没生效"）。
+
+---
+
+## L3 · 全盘 rootfs 备份（2.5 GB，手动、按需）
+
+L0/L1 只覆盖 boot 和内核/payload；L2 只覆盖 `/etc`。L3 是整块 `sda31` 的内容。
+
+| 项目 | 值 |
+|---|---|
+| 文件 | `backups/golden-wifi-r2/rootfs-r2.tar.zst` |
+| 大小 | 2.47 GB（压缩比 ~3:1） |
+| sha256 | `1cc89b608cc8c9cccbc920638e55e6c5655c1fbf235085b5e55f367b61958c18` |
+| 生成 | `tar -C / --exclude=./proc --exclude=./sys --exclude=./dev --exclude=./run --exclude=./tmp --exclude=./mnt --exclude=./var/log --exclude=./var/cache/apt/archives --exclude='./root/*.img' -cf - . \| zstd -3 -T0` |
+| 耗时 | 打包 ~80 s + USB 传到 PC ~60 s |
+
+### 恢复（整机回滚）
+
+**前提**：能进 initramfs 的串口救援 shell（`/dev/ttyGS0`，USB 连 PC）。
+
+```sh
+# 1) 把归档传回手机
+scp -i C:\Users\MAO\.ssh\mi9_key rootfs-r2.tar.zst root@169.254.42.1:/root/
+
+# 2) 手机端（串口 shell 或正常 SSH 都行，正常 SSH 时下面三步是一样的）
+sha256sum /root/rootfs-r2.tar.zst      # 必须等于 1cc89b60...
+mkdir -p /mnt/root
+mount /dev/sda31 /mnt/root
+cd /mnt/root
+tar --zstd -xpf /root/rootfs-r2.tar.zst --numeric-owner
+sync
+umount /mnt/root
+reboot
+```
+
+- 归档里**不含**它自己（`--exclude=./root/rootfs-*.tar.zst`），所以边解边读安全
+- 解包会覆盖 `/etc`、`/usr`、`/var`（日志被排除），但**不会**删掉归档之后新建的文件
+  —— 要“完全回到当时”请先 `rm -rf` 除 `/root` 外的目录，或接受“叠加式恢复”
+- 正常运行的 SSH 里直接解包到 `/` 是**不安全**的（正在运行的程序会读到半新半旧的文件），
+  所以推荐从 initramfs 救援 shell 做
+
+> 位置：`/root/rootfs-r2.tar.zst`（手机上那份保留，方便再次回滚；PC 上是主副本）
