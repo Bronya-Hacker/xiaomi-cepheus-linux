@@ -1,13 +1,15 @@
 # ---------------------------------------------------------------------------
-# mi9-pwrkey.service —— 电源键点亮 / 熄灭屏幕
+# mi9-pwrkey.service —— 电源键切换 + 空闲自动熄屏（mi9-screend）
 #
-# 监听 pm8941_pwrkey（/dev/input/event*），短按切换：
-#   屏灭时按一下 -> 重启 mi9-dashboard.service，画面回来
-#   屏亮时按一下 -> 调 mi9-screen.sh off，整屏写黑（AMOLED 省电）
+# 监听全部输入设备（pm8941_pwrkey / pm8941_resin / gpio_keys / fts 触屏）：
+#   屏灭时按电源键 -> 重启 mi9-dashboard.service，画面回来
+#   屏亮时按电源键 -> 调 mi9-screen.sh off，整屏写黑（AMOLED 省电）
+#   亮屏后 SCREEN_TIMEOUT 秒（/etc/mi9-screen.conf，默认 60）没有任何输入
+#   -> 自动熄屏，和手机的"息屏时间"一样；任何按键/触摸都会重新计时
 # 长按电源键仍然是 PMIC 层的硬关机，不受这里影响。
 # ---------------------------------------------------------------------------
 [Unit]
-Description=Mi9: power key toggles screen (wake from blank)
+Description=Mi9: power key toggles screen, idle blank after SCREEN_TIMEOUT
 Documentation=file:///usr/local/sbin/mi9-pwrkey.py
 
 [Service]

@@ -26,3 +26,7 @@ backups/
 
 # fastboot 线刷包产物（70 MB，本地生成）
 flash/
+
+# Python 字节码（py_compile 生成的）
+__pycache__/
+*.pyc

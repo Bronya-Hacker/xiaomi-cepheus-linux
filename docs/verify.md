@@ -628,7 +628,7 @@ tail -f /var/log/bt-soak.log
 
 日常开关蓝牙请用 `bluetoothctl power off/on`，**不要** `hciconfig down/up`
 （后者会重新跑 QCA 固件初始化，偶发 `command tx timeout`）。
-## 第 12 关 —— 屏幕省电（开机 60 s 熄屏 / 电源键唤醒）
+## 第 12 关 —— 屏幕省电（开机 60 s 熄屏 / 电源键唤醒 / 空闲自动熄屏）
 
 ```sh
 # 开机 60 s 后（timer 从内核启动算起，不等 wifi-up）
@@ -643,13 +643,20 @@ cat /proc/sys/kernel/printk                # 1 4 1 7（console_loglevel=1）
 # 短按电源键
 cat /run/mi9-screen.state                  # on
 systemctl is-active mi9-dashboard.service  # active
-journalctl -u mi9-pwrkey -n 5              # mi9-pwrkey: wake
+journalctl -u mi9-pwrkey -n 5              # mi9-screend: power key -> wake
+
+# 空闲自动熄屏（手机"息屏时间"那种）：亮屏后什么都不按，等 SCREEN_TIMEOUT 秒
+grep SCREEN_TIMEOUT /etc/mi9-screen.conf   # 60（0 = 关闭）
+journalctl -u mi9-pwrkey -n 5 | grep idle  # mi9-screend: idle 60s -> blank
+cat /run/mi9-screen.state                  # off
+# 期间按任意键 / 触摸屏幕会重新计时；改完配置要 systemctl restart mi9-pwrkey
 
 # 手动切换
-/usr/local/sbin/mi9-screen.sh off|on|toggle|status
+/usr/local/sbin/mi9-screen.sh off|on|toggle|auto-off|status
 ```
 
-判据：屏黑后 ssh / 串口**不受影响**；短按电源键画面回来；长按电源键仍是 PMIC 硬关机。
+判据：屏黑后 ssh / 串口**不受影响**；短按电源键画面回来；亮屏后
+`SCREEN_TIMEOUT` 秒无输入会自己再黑；长按电源键仍是 PMIC 硬关机。
 
 注意：`/sys/class/graphics/fb0/blank` 在本机是 EINVAL（simplefb 没有实现
 `fb_blank`），`/sys/module/kernel/parameters/consoleblank` 也是只读的（0444），

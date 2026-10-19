@@ -19,5 +19,6 @@ ConditionPathExists=/dev/fb0
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/mi9-screen.sh off
+# auto-off 会读 /etc/mi9-screen.conf：SCREEN_TIMEOUT=0 时开机也不熄
+ExecStart=/usr/local/sbin/mi9-screen.sh auto-off
 RemainAfterExit=yes

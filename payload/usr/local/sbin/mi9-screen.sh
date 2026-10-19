@@ -28,6 +28,18 @@ LVL=/run/mi9-screen.loglevel
 FB=/dev/fb0
 CONS=/sys/class/graphics/fbcon/cursor_blink
 DASH=mi9-dashboard.service
+CONF=/etc/mi9-screen.conf
+
+# 空闲熄屏秒数（0 = 关闭）。开机那次熄屏由 mi9-screen-off.timer 调 auto-off 触发，
+# 这里读同一份配置，保证 SCREEN_TIMEOUT=0 时开机也不熄。
+screen_timeout() {
+	_t=60
+	if [ -r "$CONF" ]; then
+		_v=$(sed -n 's/^[[:space:]]*SCREEN_TIMEOUT[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$CONF" | tail -1)
+		[ -n "$_v" ] && _t=$_v
+	fi
+	echo "$_t"
+}
 
 fb_bytes() {
 	# virtual_size = "1080,2340"，bits_per_pixel = 32 -> 10,108,800 字节
@@ -86,7 +98,9 @@ do_on() {
 case "${1:-status}" in
 	off)    do_off ;;
 	on)     do_on ;;
+	# 开机那次：SCREEN_TIMEOUT=0 时不熄（空闲逻辑整个关掉）
+	auto-off) [ "$(screen_timeout)" = 0 ] || do_off ;;
 	toggle) if [ "$(cat "$STATE" 2>/dev/null || echo on)" = off ]; then do_on; else do_off; fi ;;
 	status) cat "$STATE" 2>/dev/null || echo on ;;
-	*) echo "用法: $0 off|on|toggle|status" >&2; exit 2 ;;
+	*) echo "用法: $0 off|on|toggle|auto-off|status" >&2; exit 2 ;;
 esac
