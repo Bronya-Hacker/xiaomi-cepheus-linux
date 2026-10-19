@@ -8,6 +8,9 @@
 *.conf  text eol=lf
 
 # Windows 侧脚本保持 CRLF
+# *.bat 是给 cmd.exe 跑的：LF 换行的批处理在 goto/label 上会出怪事，
+# 而且 2026-10-20 发现 .gitattributes 里漏了这条，clone 下来再打包就会得到 LF。
+*.bat   text eol=crlf
 *.ps1   text eol=crlf
 *.cmd   text eol=crlf
 

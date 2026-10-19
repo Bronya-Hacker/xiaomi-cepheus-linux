@@ -92,6 +92,17 @@ fi
 
 # ---------------------------------------------------------------- 2) 组包
 step "1/6 组包"
+# 组包时强制 CRLF：cmd.exe 的 .bat 必须是 CRLF，PowerShell 两类都行。
+# 不能只指望 .gitattributes —— WSL 里 checkout 出来的可能是 LF（见 2026-10-20）。
+crlf() {
+	python3 - "$1" <<'PY'
+import sys
+p = sys.argv[1]
+d = open(p, "rb").read().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+open(p, "wb").write(d)
+PY
+}
+
 build_dir() { # <kind> <dir>
 	local kind=$1 dir=$2
 	rm -rf "$dir"
@@ -99,6 +110,7 @@ build_dir() { # <kind> <dir>
 	cp -f "$OUT/boot-cepheus.img" "$dir/boot.img"
 	cp -f "$OUT/kernelfat.img" "$dir/recovery.img"
 	cp -f "$TPL/verify-images.ps1" "$dir/verify-images.ps1"
+	crlf "$dir/verify-images.ps1"
 	if [ "$kind" = full ]; then
 		cp -f "$TPL/flash-all-full.bat" "$dir/flash-all.bat"
 		sed -e "s|@VERSION@|$VER|g" -e "s|@BUILT@|$BUILT|g" "$TPL/README-full.txt" >"$dir/README.txt"
@@ -106,6 +118,7 @@ build_dir() { # <kind> <dir>
 		cp -f "$TPL/flash-all-small.bat" "$dir/flash-all.bat"
 		sed -e "s|@VERSION@|$VER|g" -e "s|@BUILT@|$BUILT|g" "$TPL/README-small.txt" >"$dir/README.txt"
 	fi
+	crlf "$dir/flash-all.bat"
 	# MANIFEST：verify-images.ps1 只认 "<64hex>  <name>" 行
 	{
 		if [ "$kind" = full ]; then

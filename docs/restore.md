@@ -24,8 +24,8 @@
 | 产物 | 版本 | 校验 |
 |---|---|---|
 | `boot-cepheus.img` | DTB = 4 段（WiFi+BT+充电） | md5 `e8bce1256e63a853e94b3a32c14ea820` / sha256 `0deec99f7d5280805338a97497d9055554c256f951fb0acef8df76ab9f0e887f` |
-| `kernelfat.img` | payload `2026-10-19-wifi-3c3445-r3.4`（无 WiFi 口令、不注入公钥、升级不覆盖本机 WiFi 档案） | sha256 `353bafe2e52197db48d24edd08bbe1ee1a560ca3b48bf64580372fee2697a570` |
-| ↳ 历史内核 | `4f7bfdcd…` = r3.3 首个带"保留 WiFi 档案"的版本；`36c1e132…` = 更早那版（升级 payload 会冲掉 WiFi 配置） | 见 git 历史 |
+| `kernelfat.img` | payload `2026-10-19-wifi-3c3445-r3.5`（无 WiFi 口令、不注入公钥、升级不覆盖本机配置） | sha256 `659732f2305931ad8b95a1dd33678a4fa713601a804e9a684536609f147a6f02` |
+| ↳ 历史内核 | `353bafe2…` = r3.4（加空闲熄屏）；`4f7bfdcd…` = r3.3（首个 WiFi 档案保护）；`36c1e132…` = 更早那版（升级 payload 会冲掉 WiFi 配置） | 见 git 历史 |
 | ~~r2 内核包~~ | 含真实 WiFi 口令，**已废弃**（公开产物已删除） | sha256 `d3f9699c20f06e871db092d58b91790925d7fe25e4cee163748e51e14d38f9d5` |
 | 设备 `/root/` 里还有 | `kernelfat-srv5/6/7/8/9.img`、`sda28-before-srv2.img`、`dtbo-stock.img` | 见设备 `sha256sum` |
 
