@@ -682,3 +682,11 @@
 	 */
 	qcom,calibration-variant = "Xiaomi_raphael";
 };
+
+/*
+ * camcc（相机时钟控制器）：主线 sm8150.dtsi 只给了 clocks 列表，没有 clock-names。
+ * 驱动要按名字拿 cfg_ahb（CAMERA AHB），否则不能安全访问 camcc 寄存器。
+ */
+&camcc {
+	clock-names = "bi_tcxo", "cfg_ahb";
+};

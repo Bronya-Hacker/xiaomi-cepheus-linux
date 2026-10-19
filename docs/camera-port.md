@@ -105,3 +105,65 @@ curl -sSL -o camcc-sm8150.c \
 
 > 备注：本文件只记录计划与事实，不代表已经开始写驱动。开工时把每一步的
 > 实测结果追加到 `docs/root-cause.md`（相机部分单独开一节 §11）。
+
+## 八、事故记录与安全迭代协议（2026-10-20）
+
+### 8.1 第一次上机：直接刷挂
+
+把 `camcc-sm8150` 编进内核（`=y`）后 `dd` 到 `sda28`，重启后**整机失联**：
+USB 不枚举、WiFi 不通、串口也没有（串口同样走 USB gadget 的 `ttyGS0`）。
+
+原因分析：下游驱动的 probe 里第一步是 `devm_clk_get(&pdev->dev, "cfg_ahb_clk")`
+并 enable，然后才动 camcc 寄存器。移植时把这步当"vdd/msb 噪音"删掉了 ——
+**没有 CAMERA AHB 时钟就去读写 `0xad00000`，NoC 挂死**。
+
+`/proc/sys/kernel/panic_on_oops` 是 0，所以这甚至不是 panic：是总线锁死，
+内核连 panic 都打不出来。恢复只能：
+
+```powershell
+fastboot flash recovery cepheus-…-r3\recovery.img   # 已验证可启动的 r3.5 内核
+fastboot reboot
+```
+
+（`recovery` 分区 = `sda28`，正是内核所在；不动 dtbo/vbmeta。）
+
+### 8.2 之后的规矩（写死在流程里）
+
+1. **相机这类新驱动一律 `=m`**，开机不加载。崩了最多 `modprobe` 失败，不会拖死整机。
+2. 每次刷实验内核前，先在设备上备份当前 `sda28`：
+   `dd if=/dev/sda28 of=/root/kernelfat-safe-$(date +%m%d%H%M).img bs=1M`
+3. 刷之前确认**人能碰到手机**（要能按音量下+电源进 fastboot），远程无人值守时禁止刷实验内核。
+4. 改 `payload/` 才 bump `wifi-cfg.ver`；只换内核不 bump，模块不会重新解压（这次的坑之一）。
+
+### 8.3 下一版要验证的点
+
+- `modprobe camcc-sm8150` 后 `dmesg` 是否出现时钟注册错误/超时；
+- `clk_summary` 里 `cam_cc_*` 是否出现且可 enable；
+- 若仍挂：用 `devmem` 在"已开 AHB"的前提下先读 `0xad00000`，确认 MMIO 安全再进驱动。
+
+### 8.4 第二次上机（模块方式）：仍然锁总线，但这次留下了线索
+
+改成 `=m` + 先开 `cfg_ahb` 后，模块能加载，但 probe 走到写 PLL 时整机又锁死：
+**USB 网卡还活着（能 ping），rootfs 起不来、串口无输出** —— 不是 panic，是 NoC 停摆。
+
+恢复后（`fastboot flash recovery` r3.5）查到两个事实：
+
+| 观察 | 值 | 含义 |
+|---|---|---|
+| `pm_genpd_summary` 的 `mmcx` | `on`（64 个用户） | MMCX 本身是开着的 |
+| `ad00000.clock-controller/power/domain` | **不存在** | camcc 设备根本没挂到电源域 |
+| `cx` | `off-0` | 下游 DT 给 camcc 同时挂了 `vdd_mx`(CX) 和 `vdd_mm`(MMCX) |
+
+对照主线里能工作的 **sm8250 camcc** 节点，差别很明显：它有
+
+```dts
+clock-names = "iface", "bi_tcxo", "bi_tcxo_ao", "sleep_clk";
+```
+
+而 sm8150 的节点只有 `clocks` 没有 `clock-names`。也就是说这个上游节点是"先写了个
+架子"，驱动真正接进来之前没人验证过 —— 我们的 `of_clk_get(node, 1)` 取到的到底
+是不是 CAMERA AHB，从来没有被证实。
+
+**下一步不再是猜**：先写一个只 `ioremap + readl(0xad00000)` 的最小模块（不写、不注册），
+在串口盯着的情况下 insmod，确认"读"这一层安不安全；再逐段加写操作。每次只前进一步，
+且每次都能用 fastboot 退回。
