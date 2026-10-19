@@ -608,3 +608,23 @@ pkill hostapd; iw dev ap0 del; nmcli con up 560
 | 自建 AP 报 `Name not unique on network` | ap0 与 wlan0 用了同一个 MAC，先 `ip link set ap0 address <不同 MAC>` |
 | `netsh` 里 SSID 列表不刷新 | Windows 扫描节流；等 15–30 s 或直接定向连接 |
 | 5G 关联后没有 IP | 自建 AP 没跑 DHCP；测链路用，不必拿 IP |
+### 9.4 长稳（soak，30 分钟）
+
+```sh
+# 设备上（脚本已放在 /root/bt-soak.sh）
+nohup /root/bt-soak.sh >/dev/null 2>&1 &
+tail -f /var/log/bt-soak.log
+```
+
+判据：
+
+| 项 | 合格 |
+|---|---|
+| 轮次 | 40/40 完成 |
+| 状态 | 每轮都 `UP RUNNING`，0 次掉线 |
+| 扫描 | 每轮 8 个以上 BLE 设备 |
+| 计数器 | `hciconfig` 的 `errors: 0` |
+| 强制 off/on | 允许偶发 1 次 `baudrate` 超时，但下一轮必须自恢复 |
+
+日常开关蓝牙请用 `bluetoothctl power off/on`，**不要** `hciconfig down/up`
+（后者会重新跑 QCA 固件初始化，偶发 `command tx timeout`）。

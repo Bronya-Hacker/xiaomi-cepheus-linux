@@ -68,7 +68,13 @@ $lines += "time    : " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
 $lines += "payload : " + (Get-Version)
 $lines += "source  : $Out"
 $lines += ""
-$lines += "# sha256                                                            size      file"
+$lines += "# sizes:"
+foreach ($f in $files) {
+    $src = Join-Path $Out $f
+    if (Test-Path $src) { $lines += ("#   {0,12}  {1}" -f (Get-Item $src).Length, $f) }
+}
+$lines += ""
+$lines += "# sha256 (sha256sum -c compatible):"
 
 foreach ($f in $files) {
     $src = Join-Path $Out $f
@@ -77,7 +83,7 @@ foreach ($f in $files) {
     Copy-Item -Path $src -Destination $dst -Force
     $h = Get-Sha256 $dst
     $s = (Get-Item $dst).Length
-    $lines += ("{0}  {1,10}  {2}" -f $h, $s, $f)
+    $lines += ("{0}  {1}" -f $h, $f)
     Write-Host ("copied {0}  ({1:N1} MB)" -f $f, ($s / 1MB))
 }
 

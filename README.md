@@ -48,7 +48,7 @@ UEFI (edk2-msm) boot, WiFi + Bluetooth working, no GUI, self-healing systemd uni
 | CPU / 调频 / 温控 | ✅ | 8 核 `cpufreq-qcom-hw`，27 个热区，passive 90/95 °C，critical 110 °C |
 | 存储（UFS） | ✅ | 系统在 `/dev/sda31`（110 G） |
 | WiFi | ✅ 2.4G 实测 | `wlan0` 已连，iperf3 **60–72 Mbit/s**；5G 收发正常（自建 AP 在 ch44/ch149 均可被关联）；家里路由器 5G 不回应本机认证（AP 侧问题） |
-| 蓝牙 | ✅ | `hci0 UP RUNNING`，BLE 扫描通过，bluez 开机自启 |
+| 蓝牙 | ✅ | `hci0 UP RUNNING`，BLE 扫描通过，bluez 开机自启；30 分钟 soak 40/40 轮 0 掉线 |
 | USB 网络 / 串口 | ✅ | RNDIS/NCM + `ttyGS0` 控制台 |
 | RTC | ✅ | `rtc-pm8xxx` + nvmem offset，掉电走时正常 |
 | 充电 / 电量 | ✅ | `pm8150b-charger` / `qcom-battery`，软件停充已验证 |

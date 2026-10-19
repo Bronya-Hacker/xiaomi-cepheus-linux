@@ -1813,3 +1813,38 @@ pkill hostapd; iw dev ap0 del; nmcli con up 560
 - **2.4G 可用**，实测 60–72 Mbit/s（共享空口的下限）。
 - **5G 硬件/驱动可用**（自建 AP 在 ch44、ch149 都被 PC 成功关联）。
 - **家里这台路由器的 5G 不接这台手机**——待用户改路由器设置后再复测；手机侧没有遗留问题。
+---
+
+### 10.20 ★ 2026-10-19（续）蓝牙 30 分钟长测（soak）
+
+方法（`/root/bt-soak.sh`，日志 `/var/log/bt-soak.log`）：
+
+- 40 轮；每轮 `bluetoothctl --timeout 8 scan on` 做一次 BLE 扫描；
+- 每 5 轮做一次 `hciconfig hci0 down; sleep 1; hciconfig hci0 up`（故意折腾控制器）；
+- 每轮记录：设备数、`hciconfig` 状态行、时间戳。
+
+结果：
+
+| 指标 | 数值 |
+|---|---|
+| 完成轮次 | **40 / 40** |
+| 状态为 `UP RUNNING` 的轮次 | **40**（0 次掉线/异常） |
+| 每轮扫到的 BLE 设备 | 平均 **17.5** 个（8–22） |
+| `hciconfig` 计数器 | `errors: 0`，`RX 165236 / TX 1686868` |
+| 强制 down/up | 8 次；其中 **1 次** 出现 `Failed to change controller baudrate` + `command tx timeout`，**下一轮自动恢复** |
+| `Frame reassembly failed (-84)` | 8 次，均为良性（已知） |
+
+结论与建议：
+
+1. **控制器长稳没问题**：连续 30 分钟扫描 + 反复 off/on，没有一次掉线。
+2. **不要用 `hciconfig hci0 down/up` 当日常开关**：down 会让驱动重新跑 QCA 的
+   波特率协商（`hci_qca` 的 setup），偶发 `baudrate` 超时。日常请用
+   `bluetoothctl power off/on`（mgmt 层，不重新初始化固件）。
+3. `Frame reassembly failed (-84)` 只出现在初始化/重连时，不影响功能。
+
+复现：
+
+```sh
+nohup /root/bt-soak.sh >/dev/null 2>&1 &
+tail -f /var/log/bt-soak.log
+```
