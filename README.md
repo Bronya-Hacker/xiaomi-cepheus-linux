@@ -104,6 +104,7 @@ postmarketOS 的 `boot.img` + `pmbootstrap` 流程：
 │   ├── root-cause.md          # 每一处坑的根因、证据链与修复
 │   ├── verify.md              # 验收清单与故障对照表
 │   ├── hardware-status.md     # 硬件支持现状对照
+│   ├── restore.md             # 还原点与恢复手册
 │   └── guide.md               # 长篇构建/踩坑指南（原 README）
 └── .github/workflows/lint.yml # CI：bash -n、CRLF、敏感信息、DTS marker
 ```
@@ -193,6 +194,7 @@ git ls-files | grep -E '\.nmconnection$|wpa_supplicant-[^/]*\.conf$' \
 | [`docs/root-cause.md`](docs/root-cause.md) | 每个坑的根因分析、证据链、改动清单（含 §10.16 服务器化、§10.17 蓝牙、§10.18 充电） |
 | [`docs/verify.md`](docs/verify.md) | 分模块验收清单 + "现象 → 原因 → 修法"对照表 |
 | [`docs/hardware-status.md`](docs/hardware-status.md) | 硬件支持现状 vs 成熟移植 |
+| [`docs/restore.md`](docs/restore.md) | 还原点与恢复手册（L0 引导 / L1 系统 / L2 配置 / L3 全盘） |
 | [`docs/guide.md`](docs/guide.md) | 长篇构建指南与历史记录 |
 
 ## 固件与第三方组件
