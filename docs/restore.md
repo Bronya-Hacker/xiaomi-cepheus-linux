@@ -24,7 +24,8 @@
 | 产物 | 版本 | 校验 |
 |---|---|---|
 | `boot-cepheus.img` | DTB = 4 段（WiFi+BT+充电） | md5 `e8bce1256e63a853e94b3a32c14ea820` / sha256 `0deec99f7d5280805338a97497d9055554c256f951fb0acef8df76ab9f0e887f` |
-| `kernelfat.img` | payload `2026-10-19-wifi-3c3445-r3.3`（无 WiFi 口令、不注入公钥） | sha256 `36c1e132e31dbd6feafe2f81988520b353848cddbba006fc134e8ab183190bee` |
+| `kernelfat.img` | payload `2026-10-19-wifi-3c3445-r3.3`（无 WiFi 口令、不注入公钥） | sha256 `4f7bfdcd0ab5d29346a3c45183e092db75f8a9d8f0ed5a7d9af3f2c7c0588b91` |
+| ↳ 旧内核（Release 里那份） | 同一 payload，但**升级 payload 会覆盖本机 WiFi 档案** | sha256 `36c1e132e31dbd6feafe2f81988520b353848cddbba006fc134e8ab183190bee` |
 | ~~r2 内核包~~ | 含真实 WiFi 口令，**已废弃**（公开产物已删除） | sha256 `d3f9699c20f06e871db092d58b91790925d7fe25e4cee163748e51e14d38f9d5` |
 | 设备 `/root/` 里还有 | `kernelfat-srv5/6/7/8/9.img`、`sda28-before-srv2.img`、`dtbo-stock.img` | 见设备 `sha256sum` |
 

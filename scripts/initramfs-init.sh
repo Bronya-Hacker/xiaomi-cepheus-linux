@@ -143,7 +143,26 @@ for dev in $(ls /dev/sd[a-z]* /dev/mmcblk*p* 2>/dev/null); do
 					tar xzf "$PDIR/mods.tar.gz" -C /mnt/root/usr/lib/modules/ 2>/dev/null || _pok=0
 				fi
 				if [ -f "$PDIR/wifi-cfg.tar.gz" ]; then
+					# ★ payload 里的 WiFi 档案是**占位符**（ssid=your-ssid /
+					#   psk=changeme123），直接 tar 解到 / 会把设备上已经配好的
+					#   真实档案盖掉：2026-10-19 r3 升级后设备掉线就是这么来的。
+					#   所以先把"本机配置"抄出来，解压完再放回去。
+					_kp=/tmp/payload-keep
+					rm -rf "$_kp"
+					mkdir -p "$_kp"
+					for _f in etc/NetworkManager/system-connections/mi9-wifi.nmconnection \
+					          etc/wpa_supplicant/wpa_supplicant-wlan0.conf; do
+						[ -f "/mnt/root/$_f" ] || continue
+						grep -q 'changeme123' "/mnt/root/$_f" 2>/dev/null && continue
+						mkdir -p "$_kp/$(dirname "$_f")"
+						cp -a "/mnt/root/$_f" "$_kp/$_f" 2>/dev/null
+					done
 					tar xzf "$PDIR/wifi-cfg.tar.gz" -C /mnt/root/ 2>/dev/null || _pok=0
+					if [ -d "$_kp/etc" ]; then
+						cp -a "$_kp/etc/." /mnt/root/etc/ 2>/dev/null && \
+							say "[initramfs] ✓ 本机 WiFi 档案已保留（没被 payload 占位符覆盖）"
+					fi
+					rm -rf "$_kp"
 				fi
 				repair_lib           # 双保险：解完再查一次
 				if [ "$_pok" = 1 ]; then
