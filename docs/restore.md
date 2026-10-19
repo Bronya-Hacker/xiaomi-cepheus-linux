@@ -183,7 +183,7 @@ reboot
 
 | 文件 | 内容 | 大小 | sha256 |
 |---|---|---|---|
-| `cepheus-full-2026-10-19-r3.zip` | `boot.img` + `recovery.img` + `flash-all.bat` + `README` | 34.2 MB | 见 Release |
+| `cepheus-full-2026-10-19-r3.zip` | `boot.img` + `recovery.img` + `flash-all.bat` + `README` | 34.2 MB | `8753b441dc9f126dd8f796f7a4f2176e38c4cd9fa24f93b9bdee4aad0cd80d14` |
 | `rootfs.img.tar.zst` | ext4 rootfs，4 GB（tar+zstd） | 1.01 GiB | `9bad365d77808d02d3534b325f4a1ab9a3799be8ccef7e43bf3f4fc797e4ed48` |
 | ↳ `recovery.img` | payload `2026-10-19-wifi-3c3445-r3.3`（不注入任何公钥） | 64 MiB | `36c1e132e31dbd6feafe2f81988520b353848cddbba006fc134e8ab183190bee` |
 

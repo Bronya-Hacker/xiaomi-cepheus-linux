@@ -74,6 +74,15 @@ for p in "etc/NetworkManager/system-connections/mi9-wifi.nmconnection" \
 	if [ ! -f "$STAGE/$p" ] && [ -f "$STAGE/$p.example" ]; then
 		cp -a "$STAGE/$p.example" "$STAGE/$p"
 		echo "⚠️ 缺少 $p，已用 .example 兜底（psk 是占位符，设备不会自动连 WiFi）"
+	elif [ -f "$STAGE/$p" ]; then
+		# 仓库里不存在这两份文件（.gitignore 排除真实档案），能走到这里说明
+		# 本机用 10-provision-wifi.ps1 灌过真实口令 —— r2 泄密就是这条路径。
+		if grep -q 'changeme123' "$STAGE/$p" 2>/dev/null; then
+			echo "✓ $p 仍是占位符（psk=changeme123），可安全公开"
+		else
+			echo "⚠️ $p 含本机真实 WiFi 口令：这个包只能自用，公开镜像前必须"
+			echo "   删除 payload/ 下的 mi9-wifi.nmconnection 与 wpa_supplicant-wlan0.conf"
+		fi
 	fi
 done
 
