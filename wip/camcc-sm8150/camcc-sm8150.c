@@ -168,6 +168,7 @@ static struct clk_alpha_pll cam_cc_pll0 = {
 	.offset = 0x0,
 	.vco_table = trion_vco,
 	.num_vco = ARRAY_SIZE(trion_vco),
+	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_TRION],
 	.clkr = {
 		.hw.init = &(struct clk_init_data){
 			.name = "cam_cc_pll0",
@@ -196,6 +197,7 @@ static struct clk_alpha_pll_postdiv cam_cc_pll0_out_even = {
 		.flags = CLK_SET_RATE_PARENT,
 		.ops = &clk_alpha_pll_postdiv_trion_ops,
 	},
+	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_TRION],
 };
 
 static const struct clk_div_table post_div_table_trion_odd[] = {
@@ -216,6 +218,7 @@ static struct clk_alpha_pll_postdiv cam_cc_pll0_out_odd = {
 		.flags = CLK_SET_RATE_PARENT,
 		.ops = &clk_alpha_pll_postdiv_trion_ops,
 	},
+	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_TRION],
 };
 
 static struct alpha_pll_config cam_cc_pll1_config = {
@@ -250,6 +253,7 @@ static struct clk_alpha_pll cam_cc_pll1 = {
 	.offset = 0x1000,
 	.vco_table = trion_vco,
 	.num_vco = ARRAY_SIZE(trion_vco),
+	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_TRION],
 	.clkr = {
 		.hw.init = &(struct clk_init_data){
 			.name = "cam_cc_pll1",
@@ -273,6 +277,7 @@ static struct clk_alpha_pll_postdiv cam_cc_pll1_out_even = {
 		.flags = CLK_SET_RATE_PARENT,
 		.ops = &clk_alpha_pll_postdiv_trion_ops,
 	},
+	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_TRION],
 };
 
 static struct alpha_pll_config cam_cc_pll2_config = {
@@ -291,6 +296,7 @@ static struct clk_alpha_pll cam_cc_pll2 = {
 	.offset = 0x2000,
 	.vco_table = regera_vco,
 	.num_vco = ARRAY_SIZE(regera_vco),
+	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_REGERA],
 	.clkr = {
 		.hw.init = &(struct clk_init_data){
 			.name = "cam_cc_pll2",
@@ -319,6 +325,7 @@ static struct clk_alpha_pll_postdiv cam_cc_pll2_out_main = {
 		.flags = CLK_SET_RATE_PARENT,
 		.ops = &clk_alpha_pll_postdiv_trion_ops,
 	},
+	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_REGERA],
 };
 
 static struct alpha_pll_config cam_cc_pll3_config = {
@@ -353,6 +360,7 @@ static struct clk_alpha_pll cam_cc_pll3 = {
 	.offset = 0x3000,
 	.vco_table = trion_vco,
 	.num_vco = ARRAY_SIZE(trion_vco),
+	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_TRION],
 	.clkr = {
 		.hw.init = &(struct clk_init_data){
 			.name = "cam_cc_pll3",
@@ -376,6 +384,7 @@ static struct clk_alpha_pll_postdiv cam_cc_pll3_out_even = {
 		.flags = CLK_SET_RATE_PARENT,
 		.ops = &clk_alpha_pll_postdiv_trion_ops,
 	},
+	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_TRION],
 };
 
 static struct alpha_pll_config cam_cc_pll4_config = {
@@ -410,6 +419,7 @@ static struct clk_alpha_pll cam_cc_pll4 = {
 	.offset = 0x4000,
 	.vco_table = trion_vco,
 	.num_vco = ARRAY_SIZE(trion_vco),
+	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_TRION],
 	.clkr = {
 		.hw.init = &(struct clk_init_data){
 			.name = "cam_cc_pll4",
@@ -433,6 +443,7 @@ static struct clk_alpha_pll_postdiv cam_cc_pll4_out_even = {
 		.flags = CLK_SET_RATE_PARENT,
 		.ops = &clk_alpha_pll_postdiv_trion_ops,
 	},
+	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_TRION],
 };
 
 static const struct freq_tbl ftbl_cam_cc_bps_clk_src[] = {
@@ -2154,7 +2165,7 @@ MODULE_DEVICE_TABLE(of, cam_cc_sm8150_match_table);
  * 分步探针：stage=0 是正常完整流程；1..5 用来在真机上逐步定位"哪一步锁死总线"。
  * 每步都先 pr_info，串口/dmesg 能看到走到哪里。
  */
-static int stage = 5;
+static int stage;
 module_param(stage, int, 0644);
 MODULE_PARM_DESC(stage, "0=full probe, 1..5=stop before that step (bring-up)");
 

@@ -220,3 +220,56 @@ COM5 消失、WiFi 也没有 —— 崩在 `subsys_initcall`，比 USB gadget �
 3. 确认 PLL 的 `clk_alpha_pll` 在 vendor 与主线之间的字段差异（vendor 有 `.type/.config/vdd_class`，主线靠 `clk_trion_pll_configure()` 传 config）。
 
 在拿到第二台测试机之前，这台服务器的 `sda28` 只保留已验证的 r3.5 内核。
+
+## 九、M1 达成（2026-10-20 06:32）
+
+**camcc-sm8150 已经在真机上跑通：5 个 PLL 全部配置成功，96 个 `cam_cc_*` 时钟全部注册。**
+
+```
+insmod camcc-sm8150.ko
+    camcc: probe start (stage=0)
+    camcc: cfg_ahb on (0 Hz)
+    camcc: regmap=... (err=0)
+    camcc: pll0 configured
+    camcc: all plls configured
+grep -c cam_cc /sys/kernel/debug/clk/clk_summary   -> 96
+dmesg | grep -c 'Internal error'                   -> 0
+```
+
+### 9.1 根因（就两处，都是移植时漏字段）
+
+下游用 `.type = TRION_PLL / REGERA_PLL` 让驱动内部查寄存器表；主线 6.17 的
+`struct clk_alpha_pll` / `struct clk_alpha_pll_postdiv` 里是显式的
+**`const u8 *regs`**，必须自己填：
+
+```c
+struct clk_alpha_pll {
+	u32 offset;
+	const u8 *regs;          /* ← 没填 = NULL */
+	const struct alpha_pll_config *config;
+	...
+};
+```
+
+1. `.regs` 没填 → `clk_trion_pll_configure()` 在 `ldr x8,[pll,#0x8]` 后
+   `ldrb [x8,#0x12]` 解引用 NULL（段错误，x0 看起来像 regmap，其实是 pll）；
+2. postdiv 同样没填 `.regs` → 注册 `cam_cc_pllN_out_even/odd` 时
+   `clk_trion_pll_postdiv_recalc_rate()` 崩。
+
+修法：给 5 个 PLL 和 6 个 postdiv 各加一行
+`.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_TRION]`（pll2 用 `..._REGERA`）。
+
+### 9.2 顺带排除的伪线索
+
+- MMIO 读/写本身是安全的（独立探针验证过）；
+- `cfg_ahb` 时钟是能取到并 enable 的（rate 报 0 Hz 只是没设置速率，不影响）；
+- 父时钟表（`struct parent_map`）用的是高通自己的类型，静态校验 96 个时钟的
+  `num_parents` 与数组长度全部一致，没问题；
+- **最容易误导的一点**：模块崩溃后 `module_mutex` 卡死，表现为"USB 能 ping、
+  sshd 起不来"，看着像总线锁死，实际是内核 oops 的连带后果。
+
+### 9.3 下一步（M2）
+
+camss 需要 CAMSS **175** 的资源表和 DT 节点 + 传感器驱动，见本文三、四节。
+时钟这一步已经过关：`cam_cc_cci_0_clk` / `cam_cc_cphy_rx_clk_src` 都在
+`clk_summary` 里，camss 探针时按需 enable 即可。
