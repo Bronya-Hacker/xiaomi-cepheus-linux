@@ -316,6 +316,16 @@ git config --global url."https://gh-proxy.com/https://github.com/".insteadOf "ht
 git config --global url."https://gh-proxy.com/https://github.com/google/boringssl".insteadOf "https://boringssl.googlesource.com/boringssl"
 ```
 
+想让 git **直连**（不经过第三方代理）就跑 `sudo bash scripts/wsl-github-hosts.sh`：
+它探测一批真实 GitHub IP，把最快的那几个写进 `/etc/hosts` 的
+`>>> github-direct` 块（前提是 `/etc/wsl.conf` 里有 `[network] generateHosts = false`，
+否则 WSL 每次启动都会重写 hosts）。实测 `github.com` / `codeload` / `uploads` /
+`release-assets` 直连可用且**证书正常校验**，`git push` 不需要关 SSL 验证。
+
+只有 `raw.githubusercontent.com` 修不了：该 SNI 的 ClientHello 会被 RST
+（185.199.108-111.133 全试过），raw 文件继续走
+`https://gh-proxy.com/https://raw.githubusercontent.com/...`。
+
 ### 4.2 准备源码
 
 ```bash
