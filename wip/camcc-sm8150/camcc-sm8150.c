@@ -2154,7 +2154,7 @@ MODULE_DEVICE_TABLE(of, cam_cc_sm8150_match_table);
  * 分步探针：stage=0 是正常完整流程；1..5 用来在真机上逐步定位"哪一步锁死总线"。
  * 每步都先 pr_info，串口/dmesg 能看到走到哪里。
  */
-static int stage;
+static int stage = 5;
 module_param(stage, int, 0644);
 MODULE_PARM_DESC(stage, "0=full probe, 1..5=stop before that step (bring-up)");
 
@@ -2200,19 +2200,37 @@ static int cam_cc_sm8150_probe(struct platform_device *pdev)
 		return -EAGAIN;
 
 	regmap = qcom_cc_map(pdev, &cam_cc_sm8150_desc);
-	if (IS_ERR(regmap)) {
+	dev_info(&pdev->dev, "camcc: regmap=%px (err=%ld)\n",
+		 regmap, IS_ERR(regmap) ? PTR_ERR(regmap) : 0L);
+	if (!regmap || IS_ERR(regmap)) {
 		clk_disable_unprepare(ahb);
-		return PTR_ERR(regmap);
+		return regmap ? PTR_ERR(regmap) : -ENOMEM;
 	}
-	dev_info(&pdev->dev, "camcc: regmap ready\n");
 
 	if (stage == 3)
 		return -EAGAIN;
 
+	if (stage == 4) {
+		u32 v = 0;
+
+		regmap_read(regmap, 0x0, &v);
+		dev_info(&pdev->dev, "camcc: regmap read [0x0] = %#x\n", v);
+		regmap_write(regmap, 0x0, v);
+		dev_info(&pdev->dev, "camcc: regmap write-back ok\n");
+		return -EAGAIN;
+	}
+
+	if (stage == 5) {
+		dev_info(&pdev->dev, "camcc: stage5 -> skipping PLL config, registering clocks\n");
+		ret = qcom_cc_really_probe(&pdev->dev, &cam_cc_sm8150_desc, regmap);
+		dev_info(&pdev->dev, "camcc: really_probe returned %d\n", ret);
+		return ret;
+	}
+
 	clk_trion_pll_configure(&cam_cc_pll0, regmap, cfg0);
 	dev_info(&pdev->dev, "camcc: pll0 configured\n");
 
-	if (stage == 4)
+	if (stage == 45)
 		return -EAGAIN;
 
 	clk_trion_pll_configure(&cam_cc_pll1, regmap, cfg1);

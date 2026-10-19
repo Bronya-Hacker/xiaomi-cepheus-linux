@@ -193,3 +193,30 @@ clock-names = "iface", "bi_tcxo", "bi_tcxo_ao", "sleep_clk";
 
 下次的下一步：`insmod camcc-sm8150.ko stage=4`（只配 PLL0），串口盯着；若锁死，
 对照 vendor 的 `cam_cc_pll0_config_sm8150_v2` 逐字段核。**务必用备用机做。**
+
+### 8.7 第四次：编进内核（in-tree）直接打不开机
+
+按"模块和内核结构体可能不一致"的判断，改成 `CONFIG_SM_CAMCC_8150=y` 编进内核，
+并默认 `stage=5`（只注册时钟、不碰 PLL）。刷完 `sda28` 后设备**完全失联**：USB 不枚举、
+COM5 消失、WiFi 也没有 —— 崩在 `subsys_initcall`，比 USB gadget 更早。
+
+至此四种组合都试过：
+
+| 形态 | 结果 |
+|---|---|
+| 模块 · 完整 probe | PLL 处段错误；oops 后 `module_mutex` 卡死，整机半死（能 ping 不能 ssh） |
+| 模块 · 分步 stage 1–3 | ✅ 通过（cfg_ahb / regmap 都正常，read/write 验证安全） |
+| 模块 · stage 5（只注册时钟） | ❌ 同样把机器拖到半死 |
+| 编进内核 · stage 5 | ❌ 直接打不开机 |
+
+**结论**：问题不在 MMIO、不在时钟门控，而在**时钟注册/`clk_trion_pll_configure`
+这条内核路径**上，且我们的驱动对象与内核里的 `struct clk_regmap/clk_alpha_pll`
+之间极可能有布局或参数错位（oops 里 x0 是 regmap、x1 是 0，与源码调用的参数顺序对不上）。
+
+**下一步必须在能随便刷/能跑 QEMU 的环境里做**：
+
+1. QEMU 里用 `clk-regmap` 单元测试（或者纯 userspace 模拟 regmap）验证 96 个时钟表的父子/表项合法性；
+2. 逐一核对 vendor 的 `cam_cc_sm8150_clocks[]` 与主线 `clk_regmap` 初始化是不是同一个 ABI；
+3. 确认 PLL 的 `clk_alpha_pll` 在 vendor 与主线之间的字段差异（vendor 有 `.type/.config/vdd_class`，主线靠 `clk_trion_pll_configure()` 传 config）。
+
+在拿到第二台测试机之前，这台服务器的 `sda28` 只保留已验证的 r3.5 内核。
