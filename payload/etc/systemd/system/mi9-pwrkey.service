@@ -1,0 +1,20 @@
+# ---------------------------------------------------------------------------
+# mi9-pwrkey.service —— 电源键点亮 / 熄灭屏幕
+#
+# 监听 pm8941_pwrkey（/dev/input/event*），短按切换：
+#   屏灭时按一下 -> 重启 mi9-dashboard.service，画面回来
+#   屏亮时按一下 -> 调 mi9-screen.sh off，整屏写黑（AMOLED 省电）
+# 长按电源键仍然是 PMIC 层的硬关机，不受这里影响。
+# ---------------------------------------------------------------------------
+[Unit]
+Description=Mi9: power key toggles screen (wake from blank)
+Documentation=file:///usr/local/sbin/mi9-pwrkey.py
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/sbin/mi9-pwrkey.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

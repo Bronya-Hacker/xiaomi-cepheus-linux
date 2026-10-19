@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------------------
+# mi9-screen-off.service —— 熄屏动作（由 mi9-screen-off.timer 触发）
+#
+# 服务器定位：不接显示器、没有 GUI，屏幕只在"人凑过来看"时有用。
+# 开机 60 秒后自动黑屏；按电源键随时点亮（mi9-pwrkey.service）。
+# 实现见 /usr/local/sbin/mi9-screen.sh（simplefb 没有 fb_blank，只能写黑）。
+#
+# ★ 为什么用 timer 而不是 WantedBy=multi-user.target：
+#   multi-user.target 要等 wifi-up.service（oneshot，最长 420 s）跑完才算
+#   reached。把本服务挂在 multi-user 下，再加上 After=mi9-dashboard，
+#   systemd 会判 ordering cycle 直接删掉 job（实测：屏根本不熄）。
+#   OnBootSec=60s 与启动进度无关，WiFi 起不来也照常熄屏。
+# ---------------------------------------------------------------------------
+[Unit]
+Description=Mi9: blank screen (AMOLED power saving)
+Documentation=file:///usr/local/sbin/mi9-screen.sh
+After=mi9-dashboard.service
+ConditionPathExists=/dev/fb0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mi9-screen.sh off
+RemainAfterExit=yes

@@ -9,10 +9,17 @@
 #
 # 注意：TTYReset/TTYVHangup 都设成 no —— 我们只想往这块 tty 上写字符，
 #       不希望 systemd 在启停时把 VT 状态或别的进程一起收拾了。
+#
+# ★ 2026-10-19 修：这里**不能**写 After=multi-user.target。
+#   它自己就是 WantedBy=multi-user.target，而 multi-user 要等 wifi-up
+#   （oneshot，最长 420 s）跑完才算 reached —— 写 After 会让仪表盘拖到
+#   WiFi 起来之后才画，顺带把 After=mi9-dashboard 的熄屏服务拖成
+#   ordering cycle（systemd 直接删 job，屏根本不熄）。
+#   仪表盘只需要 tty1 和 /usr，basic.target 之后就能画；状态数据晚点再刷新。
 # ---------------------------------------------------------------------------
 [Unit]
 Description=MI9 server status dashboard on tty1 (read-only screen)
-After=multi-user.target
+After=basic.target
 
 [Service]
 Type=simple

@@ -628,3 +628,30 @@ tail -f /var/log/bt-soak.log
 
 日常开关蓝牙请用 `bluetoothctl power off/on`，**不要** `hciconfig down/up`
 （后者会重新跑 QCA 固件初始化，偶发 `command tx timeout`）。
+## 第 12 关 —— 屏幕省电（开机 60 s 熄屏 / 电源键唤醒）
+
+```sh
+# 开机 60 s 后（timer 从内核启动算起，不等 wifi-up）
+systemctl list-timers mi9-screen-off.timer
+cat /run/mi9-screen.state                  # off
+systemctl is-active mi9-dashboard.service  # inactive
+od -An -tx1 -N16 /dev/fb0                  # 全 0
+md5sum /dev/fb0                            # 隔 10 s 再算一次，必须一样（光标没有重绘）
+cat /sys/class/graphics/fbcon/cursor_blink # 0
+cat /proc/sys/kernel/printk                # 1 4 1 7（console_loglevel=1）
+
+# 短按电源键
+cat /run/mi9-screen.state                  # on
+systemctl is-active mi9-dashboard.service  # active
+journalctl -u mi9-pwrkey -n 5              # mi9-pwrkey: wake
+
+# 手动切换
+/usr/local/sbin/mi9-screen.sh off|on|toggle|status
+```
+
+判据：屏黑后 ssh / 串口**不受影响**；短按电源键画面回来；长按电源键仍是 PMIC 硬关机。
+
+注意：`/sys/class/graphics/fb0/blank` 在本机是 EINVAL（simplefb 没有实现
+`fb_blank`），`/sys/module/kernel/parameters/consoleblank` 也是只读的（0444），
+所以**不要**试图用 `echo 4 > .../blank` 或内核 console blanking 熄屏 ——
+payload 里的做法是停仪表盘 + 关光标闪烁 + 写黑 framebuffer。

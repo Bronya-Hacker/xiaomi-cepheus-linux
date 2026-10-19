@@ -24,7 +24,7 @@
 | 产物 | 版本 | 校验 |
 |---|---|---|
 | `boot-cepheus.img` | DTB = 4 段（WiFi+BT+充电） | md5 `e8bce1256e63a853e94b3a32c14ea820` / sha256 `0deec99f7d5280805338a97497d9055554c256f951fb0acef8df76ab9f0e887f` |
-| `kernelfat.img` | payload `2026-10-19-wifi-3c3445-r3`（无 WiFi 口令、不注入公钥） | sha256 `17c33955d119286f546a51203bf6d6837db60da35911427c79958435d1c5daec` |
+| `kernelfat.img` | payload `2026-10-19-wifi-3c3445-r3.3`（无 WiFi 口令、不注入公钥） | sha256 `36c1e132e31dbd6feafe2f81988520b353848cddbba006fc134e8ab183190bee` |
 | ~~r2 内核包~~ | 含真实 WiFi 口令，**已废弃**（公开产物已删除） | sha256 `d3f9699c20f06e871db092d58b91790925d7fe25e4cee163748e51e14d38f9d5` |
 | 设备 `/root/` 里还有 | `kernelfat-srv5/6/7/8/9.img`、`sda28-before-srv2.img`、`dtbo-stock.img` | 见设备 `sha256sum` |
 
@@ -185,7 +185,7 @@ reboot
 |---|---|---|---|
 | `cepheus-full-2026-10-19-r3.zip` | `boot.img` + `recovery.img` + `flash-all.bat` + `README` | 34.2 MB | 见 Release |
 | `rootfs.img.tar.zst` | ext4 rootfs，4 GB（tar+zstd） | 1.01 GiB | `9bad365d77808d02d3534b325f4a1ab9a3799be8ccef7e43bf3f4fc797e4ed48` |
-| ↳ `recovery.img` | payload `2026-10-19-wifi-3c3445-r3`（不注入任何公钥） | 64 MiB | `17c33955d119286f546a51203bf6d6837db60da35911427c79958435d1c5daec` |
+| ↳ `recovery.img` | payload `2026-10-19-wifi-3c3445-r3.3`（不注入任何公钥） | 64 MiB | `36c1e132e31dbd6feafe2f81988520b353848cddbba006fc134e8ab183190bee` |
 
 刷入：解压 zip，把 `rootfs.img.tar.zst` 放进去，跑 `flash-all.bat`
 （等价于 `fastboot flash boot` / `flash recovery` / `flash userdata`）。

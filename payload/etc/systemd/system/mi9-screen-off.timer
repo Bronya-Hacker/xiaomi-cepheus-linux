@@ -1,0 +1,18 @@
+# ---------------------------------------------------------------------------
+# mi9-screen-off.timer —— 开机 60 秒后触发熄屏
+#
+# 用 timer 而不是把 service 挂到 multi-user.target 下：multi-user 要等
+# wifi-up（oneshot，最长 420 s）跑完，WiFi 慢/坏时屏会亮很久，而且
+# service 的 After=mi9-dashboard 会形成 ordering cycle（job 被 systemd 删掉）。
+# OnBootSec 从内核启动算起，与 WiFi 是否起来无关。
+# ---------------------------------------------------------------------------
+[Unit]
+Description=Mi9: blank screen 60s after boot
+
+[Timer]
+OnBootSec=60s
+AccuracySec=1s
+Unit=mi9-screen-off.service
+
+[Install]
+WantedBy=timers.target

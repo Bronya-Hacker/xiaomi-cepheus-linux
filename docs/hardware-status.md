@@ -45,6 +45,7 @@
 | 无人值守自愈 | 基本没有 | ✅ `mi9-doctor`（15 分钟自检+自愈+健康日志） |
 | 远程运维 | SSH | ✅ SSH keepalive、journal 上限、NTP、无关服务 mask、权限加固 |
 | 仪表盘 | 无 | ✅ tty1 只读状态面板（NET/SERVICES/RECENT ERR） |
+| 屏幕省电 | 无 | ✅ 开机 60 s 熄屏（写黑 AMOLED framebuffer），电源键短按亮/灭 |
 
 ## 四、明确的待办（按性价比）
 

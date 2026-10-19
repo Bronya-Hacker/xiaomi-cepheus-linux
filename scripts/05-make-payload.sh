@@ -168,12 +168,13 @@ fi
 #   + unit），哪天想看画面 `systemctl enable --now phoneui` 就能捡回来。
 mkdir -p "$STAGE/etc/systemd/system/multi-user.target.wants"
 for u in tqftpserv.service wifi-up.service usb-net.service rtc-save.service \
-         mi9-dashboard.service mi9-charge-guard.service; do
+         mi9-dashboard.service mi9-charge-guard.service \
+         mi9-pwrkey.service; do
 	[ -f "$STAGE/etc/systemd/system/$u" ] && \
 		ln -sf "/etc/systemd/system/$u" "$STAGE/etc/systemd/system/multi-user.target.wants/$u"
 done
 mkdir -p "$STAGE/etc/systemd/system/timers.target.wants"
-for t in rtc-save.timer mi9-doctor.timer; do
+for t in rtc-save.timer mi9-doctor.timer mi9-screen-off.timer; do
 	[ -f "$STAGE/etc/systemd/system/$t" ] && \
 		ln -sf "/etc/systemd/system/$t" "$STAGE/etc/systemd/system/timers.target.wants/$t"
 done
@@ -257,6 +258,8 @@ find "$STAGE/etc" -type f -exec chmod 644 {} + 2>/dev/null || true
 find "$STAGE/usr" -type f -exec chmod 644 {} + 2>/dev/null || true
 chmod 755 "$STAGE/usr/bin/tqftpserv" \
           "$STAGE/usr/sbin/"*.sh \
+          "$STAGE/usr/local/sbin/"*.sh \
+          "$STAGE/usr/local/sbin/"*.py \
           "$STAGE/usr/local/bin/busybox" 2>/dev/null || true
 
 # ★ NetworkManager 的连接档案**必须是 0600**：tar 会按源文件模式带出 0777，
@@ -323,6 +326,10 @@ for f in usr/lib/firmware/qcom/sm8150/wlanmdsp.mbn \
          etc/sysctl.d/90-zram.conf etc/sysctl.d/99-sysrq.conf \
          usr/sbin/rtc-save.sh \
          usr/sbin/mi9-status.sh usr/sbin/mi9-doctor.sh usr/sbin/mi9-dashboard.sh \
+         usr/local/sbin/mi9-screen.sh usr/local/sbin/mi9-pwrkey.py \
+         etc/systemd/system/mi9-screen-off.service \
+         etc/systemd/system/mi9-screen-off.timer \
+         etc/systemd/system/mi9-pwrkey.service \
          etc/systemd/system/mi9-dashboard.service \
          etc/systemd/system/mi9-doctor.service \
          etc/systemd/system/mi9-doctor.timer \
@@ -350,6 +357,8 @@ for l in etc/systemd/system/netplan-ovs-cleanup.service \
          etc/systemd/system/multi-user.target.wants/rtc-save.service \
          etc/systemd/system/multi-user.target.wants/mi9-dashboard.service \
          etc/systemd/system/multi-user.target.wants/mi9-charge-guard.service \
+         etc/systemd/system/multi-user.target.wants/mi9-pwrkey.service \
+         etc/systemd/system/timers.target.wants/mi9-screen-off.timer \
          etc/systemd/system/swap.target.wants/zram-swap.service \
          etc/systemd/system/timers.target.wants/rtc-save.timer \
          etc/systemd/system/timers.target.wants/mi9-doctor.timer; do

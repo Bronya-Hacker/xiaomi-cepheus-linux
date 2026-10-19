@@ -36,7 +36,7 @@ UEFI (edk2-msm) boot, WiFi + Bluetooth working, no GUI, self-healing systemd uni
 - 启动链：ABL → **edk2-msm UEFI** → 从 `sda28`（原 recovery 分区）读 `Image` 启动
 - 系统：Ubuntu 24.04（`sda31`，约 110 GB），内核 `6.17.0-sm8150`
 - 网络：WiFi 2.4G（`ath10k_snoc` + WCN3990）、USB RNDIS/NCM、蓝牙 BLE
-- 运维：SSH、串口控制台（`ttyGS0`）、tty1 只读仪表盘、15 分钟自检自愈、60 s 硬件看门狗、zram swap
+- 运维：SSH、串口控制台（`ttyGS0`）、tty1 只读仪表盘、开机 60 s 熄屏 + 电源键亮屏、15 分钟自检自愈、60 s 硬件看门狗、zram swap
 - 电源：`pm8150b-charger` + `qcom-battery`（电量/电压/电流/温度/状态），支持软件停充
 
 **不启用**：GUI、Wayland/X、GPU 加速、音频、相机、蜂窝数据、OTG、传感器。
@@ -205,6 +205,7 @@ git ls-files | grep -E '\.nmconnection$|wpa_supplicant-[^/]*\.conf$' \
 | **mi9-doctor** | 15 分钟自检：WiFi/蓝牙/swap/磁盘/温度/权限，异常自动修 |
 | **看门狗** | `qcom_wdt` 60 s，任何全局锁死都能自动复位 |
 | **tty1 仪表盘** | 没有键盘的手机也能一眼看到 IP/温度/服务状态（纯 ASCII） |
+| **屏幕省电** | 开机 60 s（timer，与 WiFi 是否起来无关）后停仪表盘并写黑 framebuffer——AMOLED 黑像素基本不耗电；电源键短按亮/灭。simplefb 没有 `fb_blank`，所以不走内核 blanking |
 
 ## 文档
 
