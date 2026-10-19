@@ -66,8 +66,12 @@ pick() {
 }
 
 echo "== probing github.com =="
-GH=$(pick github.com https://github.com/ \
-	20.27.177.113 140.82.113.3 140.82.112.3 20.205.243.166)
+# 20.27.177.113 (Azure HK) answers the fastest but resets the POST that
+# git-receive-pack needs, so this one takes the first IP that answers at all
+# (US frontends first) instead of racing for the lowest latency.
+GH=$(pick_first github.com \
+	"https://github.com/Bronya-Hacker/xiaomi-cepheus-linux.git/info/refs?service=git-upload-pack" \
+	140.82.113.3 140.82.112.3 20.27.177.113 20.205.243.166)
 [ -z "$GH" ] && {
 	echo "no reachable github.com IP" >&2
 	exit 1
