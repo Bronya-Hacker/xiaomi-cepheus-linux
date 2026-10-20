@@ -83,3 +83,18 @@ nxp-nci-i2c
 ```
 
 payload 版本已升到 **r3.6**，下次刷 kernelfat 时会连同新模块一起解压安装。
+
+## 坑：`make modules` 会留下「由 =m 改成 =y」的旧 .ko
+
+2026-10-20 排查 `systemd-modules-load` 失败时发现：
+
+- `CONFIG_RC_CORE` 从 `=m` 改成 `=y` 之后，编译树里**旧的 `rc-core.ko` 不会被删除**；
+- 它跟着 `modules_install` 进了 payload，设备上 `modprobe ir-spi` 会先尝试加载这个
+  旧模块，直接报 `Exec format error`，于是开机 `ir-spi` 加载失败、`/dev/lirc0` 消失；
+- 而 `insmod ir-spi.ko` 却能成功（因为 `rc_core` 已经内建，符号都在）——这个
+  差异就是排查的突破口。
+
+处理：删掉编译树里的 `rc-core.ko` 并重建 payload；设备上删掉
+`/lib/modules/.../drivers/media/rc/rc-core.ko` 后 `depmod -a`。
+
+★ 以后任何 `=m → =y` 的配置变更，都要顺手删掉对应的旧 `.ko`，否则会混进 payload。
