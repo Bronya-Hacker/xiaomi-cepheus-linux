@@ -61,7 +61,12 @@ while [ $# -gt 0 ]; do
 done
 mkdir -p "$OUT"
 
-STAGE="$OUT/payload-stage"
+# ★ 暂存目录必须放在 **Linux 本地文件系统**（/tmp），不能放 out/。
+#   仓库在 /mnt/c（Windows 挂载）上，那里 chmod 是无效的 —— 目录永远显示 0777，
+#   于是后面 `chmod 755 "$STAGE"` 白做，tar 里的 "./" 就是 drwxrwxrwx，
+#   解压到手机后 **/ 会被 chmod 成 0777**（SSH 直接全废）。
+#   2026-10-21 就是这么被 05 的权限回归测试拦下来的。
+STAGE="${MI9_PAYLOAD_STAGE:-/tmp/mi9-payload-stage}"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 cp -a "$HERE/payload/." "$STAGE/"
@@ -275,11 +280,15 @@ find "$STAGE/etc" -type f -exec chmod 644 {} + 2>/dev/null || true
 #   （2026-10-19 我就是**反过来**用了这个洞：把 /usr/sbin/rtc-save.sh 换成
 #     一个含 chmod 的脚本，借 root 的定时器自救 —— 洞必须堵上，手法要记住。）
 find "$STAGE/usr" -type f -exec chmod 644 {} + 2>/dev/null || true
+# ★ 这几个目录里放的都是可执行脚本/程序，一律 755。
+#   以前只匹配 *.sh，结果**不带 .sh 的脚本**（usr/sbin/mi9-doctor、
+#   usr/local/bin/mi9-audio）被留成 644，开机 systemd 报
+#       /bin/sh: 1: exec: /usr/local/bin/mi9-audio: Permission denied
+#   mi9-audio-setup.service 于是一直失败（2026-10-21 踩到）。
 chmod 755 "$STAGE/usr/bin/tqftpserv" \
-          "$STAGE/usr/sbin/"*.sh \
-          "$STAGE/usr/local/sbin/"*.sh \
-          "$STAGE/usr/local/sbin/"*.py \
-          "$STAGE/usr/local/bin/busybox" 2>/dev/null || true
+          "$STAGE/usr/sbin/"* \
+          "$STAGE/usr/local/sbin/"* \
+          "$STAGE/usr/local/bin/"* 2>/dev/null || true
 
 # ★ NetworkManager 的连接档案**必须是 0600**：tar 会按源文件模式带出 0777，
 #   而 NM 见到 group/world 可读写会**直接拒绝加载**，日志是

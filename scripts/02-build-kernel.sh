@@ -383,7 +383,22 @@ install -m 0755 "$HERE/payload/usr/sbin/usb-mode.sh" "$IR/sbin/usb-mode.sh"
 
 # ★★ payload 内嵌：把两个包塞进 initramfs 的 /payload/。
 #    init 脚本优先从这里解包 —— 完全不碰 recovery 那个 FAT。
+#
+# ★★ 先检查 payload/ 源文件是否比现成的 wifi-cfg.tar.gz 新；是就重跑 05。
+#    以前 02 只会**拷贝**现成的包，于是改了 payload/ 却不重打 tar：
+#    版本号（按 payload 源码算的指纹）变了、包还是旧的，
+#    结果"刷了也没生效"，2026-10-21 排查 blacklist-audio.conf 时就栽在这。
 mkdir -p "$IR/payload"
+if [ -d "$HERE/payload" ] && [ -s "$OUT/wifi-cfg.tar.gz" ]; then
+	if [ -n "$(find "$HERE/payload" -newer "$OUT/wifi-cfg.tar.gz" -type f -print -quit 2>/dev/null)" ]; then
+		echo "payload/ 有更新 → 重跑 05-make-payload.sh"
+		bash "$HERE/scripts/05-make-payload.sh" >/dev/null 2>&1 || \
+			echo "⚠️ 05-make-payload.sh 执行失败（继续用旧包）"
+	fi
+elif [ -d "$HERE/payload" ] && [ ! -s "$OUT/wifi-cfg.tar.gz" ]; then
+	echo "没有 wifi-cfg.tar.gz → 先跑 05-make-payload.sh"
+	bash "$HERE/scripts/05-make-payload.sh" >/dev/null 2>&1 || true
+fi
 if [ -s "$OUT/mods.tar.gz" ]; then
 	cp "$OUT/mods.tar.gz" "$IR/payload/"
 	echo "内嵌 mods.tar.gz ($(stat -c%s "$OUT/mods.tar.gz") 字节)"

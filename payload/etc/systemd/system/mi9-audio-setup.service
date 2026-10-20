@@ -1,13 +1,16 @@
 [Unit]
 Description=Mi9 audio routing setup (WCD9340 + SLIMbus)
 After=sound.target
+# 声卡是异步注册的：q6asm_dai 等模块加载完、APR 服务就绪之后才会 probe。
+# 实测从开机到 /dev/snd/controlC0 出现要 20 秒以上，所以下面最多等 60 秒。
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-# 声卡是异步注册的，开机时 /dev/snd/controlC0 可能还没出现；
-# 这里最多等 10 秒再应用路由，避免因为竞态整段被跳过。
-ExecStart=/bin/sh -c 'for i in $(seq 1 40); do [ -e /dev/snd/controlC0 ] && break; sleep 0.25; done; exec /usr/local/bin/mi9-audio setup'
+# 先等声卡节点出现（最多 60 秒），再应用路由；成功就退出。
+ExecStart=/bin/sh -c 'for i in $(seq 1 240); do [ -e /dev/snd/controlC0 ] && break; sleep 0.25; done; if [ -e /dev/snd/controlC0 ]; then exec /usr/local/bin/mi9-audio setup; else echo "no sound card after 60s" >&2; exit 1; fi'
+TimeoutStartSec=90
 
 [Install]
 WantedBy=multi-user.target
