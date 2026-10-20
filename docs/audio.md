@@ -79,3 +79,36 @@ AFE port 配置（vendor 有专门的 slimbus port config 步骤）主线这边�
 2. 或在 `sm8150_be_hw_params_fixup` 里给 SLIM RX 口补 8 通道的 SLIMbus 映射
    （tavil AIF1 是 8 路 SLIM 通道）；
 3. 顺带把 WSA881x 扬声器功放接上（挂在 WCD9340 内部 SoundWire）。
+
+## 追加2：SLIMbus 口配置已攻克（2026-10-20 18:50）
+
+### 根因（主线 bug）
+
+`q6afe_slim_port_prepare()` 有两个问题，导致 ADSP 拒绝 SLIM RX 口配置：
+
+1. **`slimbus_dev_id` 从没被设置**（一直是 0）—— struct `q6afe_slim_cfg` 里
+   根本没有这个字段，prepare 也没传；SM8150 固件要求 `AFE_SLIMBUS_DEVICE_1 = 1`。
+2. **`shared_ch_mapping` 填错了**——注释明确写着是「128..255 的共享通道 ID」，
+   我最初填成 1,2,3,4，正确是 128,129,130,131。
+
+### 修法（3 处，都在 qdsp6 下）
+
+- `q6afe.h`：`struct q6afe_slim_cfg` 加 `u16 slimbus_dev_id;`
+- `q6afe.c`：`q6afe_slim_port_prepare()` 里传 `pcfg->slim_cfg.slimbus_dev_id = cfg->slimbus_dev_id;`
+- `q6afe-dai.c`：`q6slim_hw_params()` 里 `slim->slimbus_dev_id = 1;`
+  且 `ch_mapping = {128,129,130,131}`
+
+改完后 `AFE enable for port 0x4000` 不再报错，说明 SLIM 口配置已被 DSP 接受。
+
+### 现在卡在下一层
+
+```
+qcom-q6asm: DSP returned error[1]
+q6asm-dai: Memory_map_regions failed
+q6asm-dai: Audio Start: Buffer Allocation failed rc = -22
+```
+
+FE（MultiMedia1）的 PCM 缓冲区在做 `q6asm` 的 memory-map 时被 DSP 拒（error 1）。
+q6asm 的 iommu SID 0x1b21 与 vendor 一致，audio_pd 也已 up（PDR 有指示）。
+下一步方向：q6asm memory map 的缓冲区对齐/拓扑（topology）设置，或
+`ASM_STREAM_CMD_MEMORY_MAP` 前的 session 配置顺序。
