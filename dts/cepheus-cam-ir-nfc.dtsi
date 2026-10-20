@@ -395,3 +395,30 @@
 &q6adm {
 	qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
 };
+
+/* ================= 扬声器功放：Cirrus CS35L41 =================
+ * 原厂 DT：i2c@890000（主线 i2c4）地址 0x40，复位 GPIO89（低有效），
+ * 中断 GPIO10（低电平）。主线有 cs35l41 驱动且已编成模块。
+ * 注意：只开这一条总线 —— 之前一次性打开所有 QUP 总线导致无法开机。
+ */
+&i2c4 {
+	status = "okay";
+
+	speaker_amp: speaker-amp@40 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x40>;
+		#sound-dai-cells = <1>;
+
+		/* 主线 cs35l41 驱动假设复位是高有效：先拉低 2ms 再拉高释放。
+		 * 原来按原厂语义写成 ACTIVE_LOW，逻辑 1 反而变成物理低，
+		 * 等于一直按着复位，芯片永远等不到 OTP_BOOT_DONE。
+		 */
+		reset-gpios = <&tlmm 89 GPIO_ACTIVE_HIGH>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <10 IRQ_TYPE_LEVEL_LOW>;
+
+		cirrus,boost-peak-milliamp = <4000>;
+		cirrus,boost-ind-nanohenry = <1000>;
+		cirrus,boost-cap-microfarad = <15>;
+	};
+};

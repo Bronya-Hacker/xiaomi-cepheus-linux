@@ -334,3 +334,57 @@ SLIMbus 的 0–127 是「非共享通道」，128–255 才是「共享通道�
 
 通道编号不是这层的原因。数据面问题要么在 ADSP 的 AFE←SLIMbus 硬件配置，
 要么需要 vendor 的 SLIMbus 通道分配表。继续盲试的性价比已经很低。
+
+## 追加8：扬声器功放是 CS35L41，已经 probe 成功！（2026-10-20 23:10）
+
+### 发现过程
+
+之前一直以为扬声器是 WSA881x（走 codec 内部 SoundWire），折腾了很久都读不了寄存器。
+挂载原厂 **vendor 分区**（`/dev/sde53`，只读）后翻到：
+
+```
+/vendor/firmware/cs35l41-dsp1-spk-prot.bin / .wmfw
+/vendor/lib/modules/audio_cs35l41.ko
+/vendor/etc/cs35l41_cal.wav
+原厂 DT: cs35l41@40 { compatible = "cirrus,cs35l41"; ... } 在 i2c@890000
+```
+
+**扬声器功放是 Cirrus CS35L41**，而且主线内核**已经有 cs35l41 驱动**
+（`CONFIG_SND_SOC_CS35L41=m` + `_I2C=m`，而且我们早就编进去了）。
+
+### 接线
+
+| 信号 | 值 |
+|---|---|
+| I2C | `i2c@890000`（主线 **i2c4**），地址 **0x40** |
+| 复位 | GPIO **89** |
+| 中断 | GPIO **10**（低电平） |
+| 音频输入 | **secondary MI2S**：GPIO126（SCLK）、127（WS）、128/129（SD0/SD1）|
+
+### 踩的坑：复位极性
+
+第一版照原厂语义写成 `GPIO_ACTIVE_LOW`，驱动报：
+
+```
+cs35l41 0-0040: error -ENXIO: Failed waiting for OTP_BOOT_DONE
+```
+
+原因：主线驱动假设复位是**高有效**——先拉低 2ms 再拉高释放；用 ACTIVE_LOW
+时逻辑 1 变成物理低，等于一直按着复位。改成 `GPIO_ACTIVE_HIGH` 后：
+
+```
+cs35l41 0-0040: Cirrus Logic CS35L41 (35a40), Revision: B0
+```
+
+**驱动 probe 成功**，芯片 ID `35a40` 读出来了，I2C 上还能直接读到同样的 ID。
+
+### 还差的一步
+
+功放已经是 ASoC 组件但还没接进声卡。要出声需要：
+
+1. 把 GPIO126-129 mux 成 `sec_mi2s`；
+2. 在声卡里加一条 dai-link：`cpu = <&q6afedai SECONDARY_MI2S_RX>`、
+   `codec = <&speaker_amp 0>`；
+3. 给功放配 MCLK（原厂有 `sec_mi2s_mclk` 引脚）。
+
+这条路比 WSA881x/SoundWire 那条干净得多——全是主线现成的驱动。
