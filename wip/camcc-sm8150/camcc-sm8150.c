@@ -35,6 +35,7 @@
 #include <dt-bindings/clock/qcom,camcc-sm8150.h>
 
 #include "common.h"
+#include "gdsc.h"
 #include "clk-regmap.h"
 #include "clk-rcg.h"
 #include "clk-branch.h"
@@ -2039,6 +2040,67 @@ static struct clk_branch cam_cc_qdss_debug_xo_clk = {
 	},
 };
 
+
+static struct gdsc titan_top_gdsc;
+
+/*
+ * 相机 GDSC，寄存器偏移来自原厂 DT（qcom,gdsc@0xad0xxxx）：
+ *   bps 0x7004 / ipe_0 0x8004 / ipe_1 0x9004 /
+ *   ife_0 0xa004 / ife_1 0xb004 / titan_top 0xc1bc
+ */
+static struct gdsc bps_gdsc = {
+	.gdscr = 0x7004,
+	.pd = { .name = "bps_gdsc" },
+	.flags = HW_CTRL | POLL_CFG_GDSCR,
+	.pwrsts = PWRSTS_OFF_ON,
+};
+
+static struct gdsc ipe_0_gdsc = {
+	.gdscr = 0x8004,
+	.pd = { .name = "ipe_0_gdsc" },
+	.flags = HW_CTRL | POLL_CFG_GDSCR,
+	.pwrsts = PWRSTS_OFF_ON,
+};
+
+static struct gdsc ipe_1_gdsc = {
+	.gdscr = 0x9004,
+	.pd = { .name = "ipe_1_gdsc" },
+	.flags = HW_CTRL | POLL_CFG_GDSCR,
+	.pwrsts = PWRSTS_OFF_ON,
+};
+
+static struct gdsc ife_0_gdsc = {
+	.gdscr = 0xa004,
+	.pd = { .name = "ife_0_gdsc" },
+	.flags = POLL_CFG_GDSCR,
+	.parent = &titan_top_gdsc.pd,
+	.pwrsts = PWRSTS_OFF_ON,
+};
+
+static struct gdsc ife_1_gdsc = {
+	.gdscr = 0xb004,
+	.pd = { .name = "ife_1_gdsc" },
+	.flags = POLL_CFG_GDSCR,
+	.parent = &titan_top_gdsc.pd,
+	.pwrsts = PWRSTS_OFF_ON,
+};
+
+static struct gdsc titan_top_gdsc = {
+	.gdscr = 0xc1bc,
+	.pd = { .name = "titan_top_gdsc" },
+	.flags = POLL_CFG_GDSCR,
+	.pwrsts = PWRSTS_OFF_ON,
+};
+
+static struct gdsc *cam_cc_sm8150_gdscs[] = {
+	[CAM_CC_BPS_GDSC] = &bps_gdsc,
+	[CAM_CC_IPE_0_GDSC] = &ipe_0_gdsc,
+	[CAM_CC_IPE_1_GDSC] = &ipe_1_gdsc,
+	[CAM_CC_IFE_0_GDSC] = &ife_0_gdsc,
+	[CAM_CC_IFE_1_GDSC] = &ife_1_gdsc,
+	[CAM_CC_TITAN_TOP_GDSC] = &titan_top_gdsc,
+};
+
 static struct clk_regmap *cam_cc_sm8150_clocks[] = {
 	[CAM_CC_BPS_AHB_CLK] = &cam_cc_bps_ahb_clk.clkr,
 	[CAM_CC_BPS_AREG_CLK] = &cam_cc_bps_areg_clk.clkr,
@@ -2150,6 +2212,8 @@ static const struct qcom_cc_desc cam_cc_sm8150_desc = {
 	.config = &cam_cc_sm8150_regmap_config,
 	.clks = cam_cc_sm8150_clocks,
 	.num_clks = ARRAY_SIZE(cam_cc_sm8150_clocks),
+	.gdscs = cam_cc_sm8150_gdscs,
+	.num_gdscs = ARRAY_SIZE(cam_cc_sm8150_gdscs),
 };
 
 static const struct of_device_id cam_cc_sm8150_match_table[] = {

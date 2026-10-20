@@ -105,4 +105,12 @@
 #define CAM_CC_QDSS_DEBUG_XO_CLK				94
 #define CAM_CC_SLOW_AHB_CLK_SRC					95
 
+/* GDSCs（顺序必须与 cam_cc_sm8150_gdscs[] 一致） */
+#define CAM_CC_BPS_GDSC						96
+#define CAM_CC_IPE_0_GDSC					97
+#define CAM_CC_IPE_1_GDSC					98
+#define CAM_CC_IFE_0_GDSC					99
+#define CAM_CC_IFE_1_GDSC					100
+#define CAM_CC_TITAN_TOP_GDSC					101
+
 #endif

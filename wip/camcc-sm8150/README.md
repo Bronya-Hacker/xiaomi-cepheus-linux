@@ -38,3 +38,22 @@
 fastboot flash recovery flash\cepheus-2026-10-19-wifi-3c3445-r3\recovery.img
 fastboot reboot
 ```
+
+## GDSC 已加（2026-10-20 14:18，真机验证）
+
+偏移取自原厂 DT 的 `qcom,gdsc@0xad0xxxx`：
+
+| GDSC | 寄存器 |
+|---|---|
+| bps | 0x7004 |
+| ipe_0 | 0x8004 |
+| ipe_1 | 0x9004 |
+| ife_0 | 0xa004 |
+| ife_1 | 0xb004 |
+| titan_top | 0xc1bc |
+
+真机加载后 `pm_genpd` 里六个域全部出现，96 个时钟不变，0 oops；
+`qcom-camss` 仍能正常绑定（vfe0/vfe1 各 6 clocks、IRQ 183/184）。
+
+`cam_cc_sm8150_gdscs[]` 的顺序 = dt-bindings 里的编号
+（96 bps / 97 ipe_0 / 98 ipe_1 / 99 ife_0 / 100 ife_1 / 101 titan_top）。
