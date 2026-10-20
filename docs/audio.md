@@ -477,3 +477,38 @@ cs35l41 0-0040: ASoC: PRE_PMU: Main AMP event failed: -110
 正是为了这个（否则连刷 kernelfat 都不会重新解压）。
 
 推论：之前几次"改了模块、重启后行为没变"的困惑，根源就在这里。
+
+### ★ 根因：secondary MI2S 的引脚在主线 pinctrl 里没有 GPIO 功能（2026-10-21 02:00）
+
+实测 `gpioget gpiochip3 <n>`：
+
+| 引脚 | 作用 | 结果 |
+|---|---|---|
+| 126 | SEC_MI2S SCLK | ❌ Invalid argument |
+| 127 | SEC_MI2S WS | ❌ Invalid argument |
+| 128 | SEC_MI2S SD0 | ❌ Invalid argument |
+| 129 | SEC_MI2S SD1 | ❌ Invalid argument |
+| 130 | SEC_MI2S MCLK | ✅ 能读 |
+
+看 `drivers/pinctrl/qcom/pinctrl-sm8150.c`：
+
+```c
+[126] = PINGROUP(126, SOUTH, sec_mi2s, qup2, phase_flag, _, ...);
+[130] = PINGROUP(130, SOUTH, sec_mi2s, pll_bist, atest_usb20, atest_char0, ...);
+```
+
+126-129 的功能表里**没有 gpio 位**（对比 130 有），所以这些脚在 gpiochip 的
+valid_mask 之外 → pinctrl 框架 `ops->request` 走 `gpiochip_line_is_valid()`
+失败 → 任何引用它们的 pinctrl 状态都会 `-EINVAL`（这就是之前挂在 &sound 上
+导致声卡注册失败的原因）。
+
+也就是说：**在主线 sm8150 的 pinctrl 定义下，secondary MI2S 的 SCLK/WS/SD
+根本申请不到**，功放这条路被 pinctrl 卡住，不是音频驱动的问题。
+
+### 解决方向
+
+给 `pinctrl-sm8150.c` 里 126-129 的 PINGROUP 补上 gpio 功能位（4 行改动），
+让它们能被 request；然后 pinctrl 状态才能把它们 mux 成 sec_mi2s。
+
+★ 注意：这属于改动主线 pinctrl 定义，要确认不影响其它功能（这几个脚只有
+sec_mi2s / qup2 / phase_flag 等，加 gpio 位只是允许 GPIO 用法）。

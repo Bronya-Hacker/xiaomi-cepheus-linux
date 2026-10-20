@@ -437,6 +437,10 @@
 		 */
 		VA-supply = <&vreg_s4a_1p8>;
 		VP-supply = <&vreg_bob>;
+		/* MI2S 引脚复用挂在功放上：万一 mux 失败也只影响功放，不会拖垮声卡注册 */
+		pinctrl-names = "default";
+		pinctrl-0 = <&sec_mi2s_active>;
+
 		reset-gpios = <&tlmm 89 GPIO_ACTIVE_HIGH>;
 		interrupt-parent = <&tlmm>;
 		interrupts = <10 IRQ_TYPE_LEVEL_LOW>;
@@ -453,7 +457,7 @@
 /* 扬声器功放的音频输入：secondary MI2S（原厂 gpio126-129） */
 &tlmm {
 	sec_mi2s_active: sec-mi2s-active {
-		pins = "gpio126", "gpio127", "gpio128", "gpio129";
+		pins = "gpio126", "gpio127", "gpio128", "gpio129", "gpio130";
 		function = "sec_mi2s";
 		drive-strength = <8>;
 		bias-disable;

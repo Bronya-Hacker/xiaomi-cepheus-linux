@@ -72,6 +72,19 @@ static int sm8150_i2s_snd_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_dai *codec_dai;
 	int ret, i;
 
+	/* AFE 侧：给 MI2S 开 MCLK 和位时钟（照 sdm845 的做法）。
+	 * CS35L41 上电需要稳定的 MCLK，缺了它 GLOBAL_EN 会超时(-110)。
+	 */
+	ret = snd_soc_dai_set_sysclk(cpu_dai, Q6AFE_LPASS_CLK_ID_MCLK_1,
+				     12288000, SNDRV_PCM_STREAM_PLAYBACK);
+	if (ret < 0 && ret != -ENOTSUPP)
+		dev_warn(rtd->dev, "MCLK_1 set failed: %d\n", ret);
+
+	ret = snd_soc_dai_set_sysclk(cpu_dai, Q6AFE_LPASS_CLK_ID_SEC_MI2S_IBIT,
+				     1536000, SNDRV_PCM_STREAM_PLAYBACK);
+	if (ret < 0 && ret != -ENOTSUPP)
+		dev_warn(rtd->dev, "SEC_MI2S_IBIT set failed: %d\n", ret);
+
 	ret = snd_soc_dai_set_fmt(cpu_dai, fmt);
 	if (ret < 0 && ret != -ENOTSUPP)
 		return ret;
