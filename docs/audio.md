@@ -152,3 +152,48 @@ vendor 用的是 **`msm-audio-ion`**（专用 Ion heap + ADSP 可访问的固定
    用物理地址做 memory-map（而不是 IOVA）；
 3. 这一步基本要靠 ADSP 固件的接口文档，主线没有现成参考（sm8250 音频用的是
    GPR/Audioreach 新架构，路径不同）。
+
+## 追加4：播放打通后，扬声器（WSA881x）卡在 SWR 链路
+
+### 已完成
+
+- `q6asm` 内存映射**解决**：连续映射失败自动退化为按 period 分段映射，
+  2 秒 440Hz `aplay` 跑完、dmesg 零错误；
+- WSA881x 两个功放在 SoundWire 上**枚举成功**：
+  `sdw:0:0:0217:2010:00:1` / `:2`，`wsa881x-codec` 驱动绑定；
+- 时钟核对无误：`ln_bb_clk2` = 19.2 MHz（与 vendor 一致），
+  codec 的 `mclk` = 19.2/2 = 9.6 MHz（SWR 时钟门）。
+
+### 卡点
+
+加了功放之后，寄存器读写全部失败：
+
+```
+soundwire sdw-master-0-0: trf on Slave 0 failed:-5
+qcom-soundwire: SWR CMD error, fifo status 0x3e000127, flushing fifo
+qcom-soundwire: swrm_wait_for_frame_gen_enabled: link status not disconnected
+qcom-soundwire: link failed to connect
+wsa881x-codec: Initialization not complete, timed out
+```
+
+把功放放进 BE 的 codec 列表后，BE 启动会等它们，结果播放超时（-ETIMEDOUT），
+所以先摘掉——现在播放恢复干净。
+
+### 已排除
+
+| 假设 | 结论 |
+|---|---|
+| DT 配置抄错 | 与主线 db845c（同为 wcd9340 + qcom-soundwire v1.3.0）完全一致 |
+| `default_rows/cols` 缺失 | `swrm_v1_3_data` 有 48/16，正常 |
+| 时钟频率不对 | 19.2 MHz / 9.6 MHz 均与 vendor 一致 |
+| `iface` 时钟拿不到 | 驱动 probe 成功，无报错 |
+| 功放没供电/被 shutdown | 能枚举说明已上电且不在 shutdown |
+
+### 下一步方向
+
+1. 怀疑 **codec 电源状态顺序**：功放 probe 时 codec 还在 DAPM standby，
+   内部 SWR 时钟被自己的电源管理关掉 → 没有帧。可试"先跑一次 DAPM 路径
+   （如录音）再让功放 probe"；
+2. 或检查 `wcd934x_swrm_clock()` 写 `WCD934X_CDC_CLK_RST_CTRL_SWR_CONTROL`
+   时 codec 是否真的接受（该寄存器经 SLIMbus 写入，可加调试打印确认）；
+3. fifo status `0x3e000127` 可对照 qcom-soundwire 的错误位定义进一步定位。
