@@ -57,10 +57,10 @@ UEFI (edk2-msm) boot, WiFi + Bluetooth working, no GUI, self-healing systemd uni
 | RTC | ✅ | `rtc-pm8xxx` + nvmem offset，掉电走时正常 |
 | 充电 / 电量 | ✅ | `pm8150b-charger` / `qcom-battery`，软件停充已验证 |
 | 硬件看门狗 | ✅ | `qcom_wdt`，systemd 30 s 喂狗，卡死自动重启 |
-| 红外发射 | ✅ | `ir-spi-led`（SPI1 / QUP 0x884000），`/dev/lirc0`，`ir-ctl --scancode` 实测发出 |
+| 红外发射 | ✅ | `ir-spi-led`（SPI1 / QUP 0x884000），`/dev/lirc0`，`ir-ctl --scancode` 实测发出。★ 注意 payload 里必须清掉陈旧的 `rc-core.ko`（`RC_CORE` 已改成内建），否则开机 modprobe 报 `Exec format error` |
 | NFC | 🟡 | 芯片实为 **NXP SN100U**（不是 PN5xx）：`nfc0` 注册、驱动绑定、中断正常、I2C 应答；但主线 `nxp-nci` 不支持 SN100，NCI 复位超时（需移植驱动） |
-| 音频 | 🟡 | WCD9340（chip id `0x108`）+ 声卡 `sm8150-tavil-snd-card` + 耳机检测 + 5 个 PCM，**播放链路通**（`mi9-audio tone` 零错误）；SLIMbus 数据面不搬数据（录音全 0）。扬声器功放实为 **CS35L41**（非 WSA881x），已 probe 成功（`35a40`, Rev B0），走 **secondary MI2S（GPIO126-130）** |
-| 扬声器 | 🟡 待验证 | 卡点已定位：我们自己的 DTS 里 `gpio-reserved-ranges = <0 4>, <126 4>` 把 MI2S 的 126-129 保留掉了，导致引脚申请 `-EINVAL`、功放拿不到 I2S。已去掉 `<126 4>`，待刷机验证 |
+| 音频 | 🟡 | WCD9340 + 声卡 `sm8150-tavil-snd-card`（**1032 个混音器控件**，SLIM 与 MI2S 两条后端路由都在）+ 耳机检测；播放链路通（`mi9-audio tone` 零错误）。扬声器功放是 **CS35L41**（`35a40` Rev B0），已 probe 成功。SLIMbus 数据面仍不搬数据（录音全 0） |
+| 扬声器 | ❌ 受阻 | 功放走 **secondary MI2S（GPIO126-130）**，但这 4 个脚在 `gpio-reserved-ranges` 里被保留（主线所有 sm8150 板子都这么做）。实测**去掉保留会让手机完全无法启动**，所以这条路暂时走不通；需要先搞清这 4 个脚到底被谁占用 |
 | 显示 | ⚠️ | 仅 `simple-framebuffer` 文本控制台（无 DRM/GPU） |
 | 触摸 | ⚠️ | 驱动 probe，但初始化报 `800E0007`（无 GUI 影响小） |
 | 相机 | ❌ | 已归档：SoC 侧全通，但模组从不应答（`archive/camera/`） |
