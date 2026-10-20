@@ -50,3 +50,32 @@ $ cat /proc/asound/cards
 
 - 先加 wsa881x 子节点 + 正确的 `audio-routing` 和 DAPM 通路，
   再用 `speaker-test` / `amixer` 逐步调试，直到耳机和扬声器都能出声。
+
+## 追加：出声的最后一步卡在 AFE 口（2026-10-20 18:30）
+
+### 已打通
+
+- 声卡 `sm8150-tavil-snd-card` 注册，codec chip id 0x108，Headset Jack 正常；
+- FE↔BE 路由通了：`amixer cset name='SLIMBUS_0_RX Audio Mixer MultiMedia1' 1`
+  之后 `speaker-test` 不再报 "no backend DAIs"，说明 FE(MultiMedia1) 已经连到 BE(SLIM Playback)。
+
+### 卡点
+
+```
+qcom-q6afe: cmd = 0x100e5 returned error = 0x9
+qcom-q6afe: AFE enable for port 0x4000 failed -22
+q6afe-dai: fail to start AFE port 2  (SLIMBUS_0_RX)
+```
+
+ADSP 固件拒绝启用 SLIMBUS_0_RX 这个 AFE 口（DSP error 9）。试过 S16/S24、
+mono/stereo、48k/44.1k 都一样。这不是码率/位宽问题，而是 **SLIM RX 口的
+AFE port 配置（vendor 有专门的 slimbus port config 步骤）主线这边缺了**，
+或者 tavil 的 SLIM RX 口需要在 codec AIF1 侧先把 SLIMbus stream 配好。
+
+### 下一步方向
+
+1. 对照 vendor 的 `q6afe` port config（SLIMBUS_0_RX 的 channels/bit_width
+   /slimbus 映射），确认主线 `q6afe-dai` 有没有少传 port config；
+2. 或在 `sm8150_be_hw_params_fixup` 里给 SLIM RX 口补 8 通道的 SLIMbus 映射
+   （tavil AIF1 是 8 路 SLIM 通道）；
+3. 顺带把 WSA881x 扬声器功放接上（挂在 WCD9340 内部 SoundWire）。
