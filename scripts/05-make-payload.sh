@@ -178,6 +178,7 @@ fi
 mkdir -p "$STAGE/etc/systemd/system/multi-user.target.wants"
 for u in tqftpserv.service wifi-up.service usb-net.service rtc-save.service \
          mi9-dashboard.service mi9-charge-guard.service \
+         mi9-audio-setup.service \
          mi9-pwrkey.service; do
 	[ -f "$STAGE/etc/systemd/system/$u" ] && \
 		ln -sf "/etc/systemd/system/$u" "$STAGE/etc/systemd/system/multi-user.target.wants/$u"

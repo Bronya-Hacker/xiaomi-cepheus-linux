@@ -1,0 +1,13 @@
+[Unit]
+Description=Mi9 audio routing setup (WCD9340 + SLIMbus)
+After=sound.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# 声卡是异步注册的，开机时 /dev/snd/controlC0 可能还没出现；
+# 这里最多等 10 秒再应用路由，避免因为竞态整段被跳过。
+ExecStart=/bin/sh -c 'for i in $(seq 1 40); do [ -e /dev/snd/controlC0 ] && break; sleep 0.25; done; exec /usr/local/bin/mi9-audio setup'
+
+[Install]
+WantedBy=multi-user.target
