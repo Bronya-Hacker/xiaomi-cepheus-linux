@@ -19,6 +19,12 @@ HDR="ts,uptime_s,load1,mem_used_pct,temp_c,cpu_mhz,wlan_dbm,wlan_tx_fail,disk_us
 [ -f "$LOG" ] || echo "$HDR" > "$LOG"
 
 now=$(date +%s)
+# 时钟合理性：RTC 还没被 NTP 校正时可能写出离谱的时间戳（2026-10-20 的 CSV
+# 里就出现过 2084 年的记录，会让分析脚本误判）。超出 2023..2033 就跳过本次。
+if [ "$now" -lt 1700000000 ] || [ "$now" -gt 2000000000 ]; then
+	logger -t mi9-soak "clock not trustworthy (ts=$now), skipping this sample" 2>/dev/null || true
+	exit 0
+fi
 up=$(cut -d. -f1 /proc/uptime)
 load1=$(cut -d' ' -f1 /proc/loadavg)
 
