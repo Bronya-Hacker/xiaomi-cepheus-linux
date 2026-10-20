@@ -98,3 +98,45 @@ payload 版本已升到 **r3.6**，下次刷 kernelfat 时会连同新模块一�
 `/lib/modules/.../drivers/media/rc/rc-core.ko` 后 `depmod -a`。
 
 ★ 以后任何 `=m → =y` 的配置变更，都要顺手删掉对应的旧 `.ko`，否则会混进 payload。
+## 追加：NFC 读卡工具 + 芯片探测（2026-10-20 晚）
+
+### 工具 mi9-nfc-poll
+
+系统里没有 `nfc-tools` / `neard`，所以写了一个直接走
+`AF_NETLINK` + `NETLINK_GENERIC` + genl family `nfc` 的小工具
+（源码 `payload/usr/local/bin/mi9-nfc-poll.c`，设备上用 gcc 编译）。
+
+```sh
+mi9-nfc-poll 15     # 轮询 15 秒，打印标签 UID（NFCID1）
+```
+
+它能正常找到 nfc genl family（id=28）并发出 DEV_UP / START_POLL。
+
+### 但设备起不来
+
+```
+netlink error: Connection timed out        (DEV_UP)
+nci: __nci_request: wait_for_completion_interruptible_timeout failed 0
+nxp-nci_i2c 0-0028: NFC: Read failed with error -121
+```
+
+### 已经查清的部分
+
+- 总线/地址/引脚都和原厂 DT 一致：`i2c@a84000`、0x28、IRQ=GPIO47、
+  VEN=GPIO103、FIRM=GPIO48；
+- 驱动确实把 VEN 拉高、FIRM 拉低（debugfs 里能观察到 103=high、48=low）；
+- **手动**卸掉驱动、用 `gpioset` 拉高 VEN 后，`i2cget -y 0 0x28`
+  返回 `0x00`，说明**芯片在 I2C 上会 ACK**；
+- 干净上电（VEN 低→高）后约 **62ms** 芯片就能应答；
+- 驱动的上电延时已从 10–15ms 提到 200ms（`drivers/nfc/nxp-nci/i2c.c`），
+  但仍然超时。
+
+### 还没解决的
+
+- 发 NCI `CORE_RESET_CMD`（`20 00 01 00`）后读回的是 `00 00 00`，
+  不是合法的 NCI 响应；
+- IRQ 线（GPIO47）在芯片上电后一直是高，读操作也不会让它释放。
+
+也就是说 I2C 层通了、NCI 协议层没通。下一步要确认：IRQ 的
+触发类型（我们现在是 `IRQ_TYPE_EDGE_RISING`，考虑改 `LEVEL_HIGH`）、
+以及芯片是不是需要一个特定上电时序（CLKREQ / 固件下载）。
