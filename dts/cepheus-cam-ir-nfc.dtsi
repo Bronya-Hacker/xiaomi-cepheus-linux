@@ -200,6 +200,8 @@
 		reg = <0x28>;
 
 		interrupt-parent = <&tlmm>;
+		/* NXP NQ 的 IRQ 必须用边沿触发：芯片数据没被读走时会把线一直拉高，
+	 * 用电平触发会造成中断风暴把系统卡死。 */
 		interrupts = <47 IRQ_TYPE_EDGE_RISING>;
 		interrupt-names = "nfc_irq";
 

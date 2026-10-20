@@ -140,3 +140,34 @@ nxp-nci_i2c 0-0028: NFC: Read failed with error -121
 也就是说 I2C 层通了、NCI 协议层没通。下一步要确认：IRQ 的
 触发类型（我们现在是 `IRQ_TYPE_EDGE_RISING`，考虑改 `LEVEL_HIGH`）、
 以及芯片是不是需要一个特定上电时序（CLKREQ / 固件下载）。
+
+## 事故记录：NFC 中断改成电平触发把系统卡死（2026-10-20 21:00）
+
+### 发生了什么
+
+为了排查 NCI 握手超时，把 DT 里 NFC 的 IRQ 从
+`IRQ_TYPE_EDGE_RISING` 改成 `IRQ_TYPE_LEVEL_HIGH`，同时把驱动里
+`request_threaded_irq()` 的 `IRQF_TRIGGER_RISING` 去掉，想让 DT 生效。
+
+结果：刷完开机后**系统完全卡死**，SSH（USB/局域网）都连不上。
+
+### 原因
+
+这颗 NXP NQ 芯片的 IRQ 在**数据没被读走时会一直保持高电平**。
+改成电平触发后，中断持续触发而处理程序清不掉 → **中断风暴**，
+CPU 被占死。
+
+主线驱动把 `IRQF_TRIGGER_RISING` 硬编码在驱动里是有道理的，
+DT 配什么都会被它覆盖。
+
+### 恢复过程与教训
+
+1. 长按电源强制关机 → 音量下+电源进 fastboot；
+2. 光刷 kernelfat 不够：**payload 版本号没变就不会重新解压**，
+   坏的驱动模块仍在 rootfs 里，开机继续风暴；
+3. 最后同时刷了「payload 升版 + DT 改回 EDGE_RISING」的 kernelfat 和 boot 才救回来。
+
+★ 两个教训：
+- **NFC 的 IRQ 必须用边沿触发**，绝不能用 level；
+- **改驱动模块后要升 payload 版本号**，否则刷 kernelfat 不会生效
+  （`/etc/wifi-cfg.ver` 不匹配才触发解压）。
