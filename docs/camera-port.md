@@ -353,3 +353,19 @@ dmesg: vfe0/vfe1 各 "6 clocks ok"、IRQ 183/184，无 oops
 
 时钟（M1）与采集管线（M2）都已打通并提交：`/dev/media0` + `/dev/video0..7` 在设备上。
 再往下就是"数据"问题，没有表就只能停在这里。
+
+### 12.3 测试图案实验（2026-10-20 13:20）
+
+- CSID 的 `V4L2_CID_TEST_PATTERN` 可用：`/dev/v4l-subdev4`（msm_csid0）设 `test_pattern=1 (Incrementing)` 成功；
+- 但 `v4l2-ctl --stream-mmap` 报 **`VIDIOC_REQBUFS: Cannot allocate memory`** ——
+  原因是 DT 里 camss 节点**没有 `iommus`**，vb2-dma-sg 拿不到 IOMMU 域，缓冲区分配不出来。
+- 下游 DT 里相机 SMMU 的 stream ID 已挖到（`qcom,cam_smmu/msm_cam_smmu_ife`）：
+  `0x840 0x860 0xa40 0xa60 0xc40 0xc60 0xe40 0xe60`，mask `0x620`。
+- 主线参考写法（sm8250）：`iommus = <&apps_smmu 0x800 0x400>;` +
+  `power-domains = <&camcc IFE_0_GDSC>;` —— 说明 camcc 还应该导出 IFE GDSC，
+  我们这版 camcc 只导出了时钟，没导 GDSC。
+
+**下一步（需要再刷一次 boot 分区）**：
+1. DT 加 `iommus = <&apps_smmu 0x840 0x620>, <&apps_smmu 0x860 0x620>;`；
+2. camcc 补 GDSC（IFE_0/IFE_1/TITAN_TOP 等），camss 用 `power-domains = <&camcc ...>`；
+3. 重建 boot → 刷 boot → 重测 test pattern 出帧。
