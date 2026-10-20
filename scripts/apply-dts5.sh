@@ -31,29 +31,24 @@ BOARDSRC="$HERE/dts/sm8150-xiaomi-cepheus.dts"
 
 cp -a "$SRC" "$DST"
 
+# ★ 千万不要把仓库的 dts/sm8150-xiaomi-cepheus.dts 覆盖到内核树！
+#   仓库那份是**干净的主线板级 DTS**（没有 UFS / 充电 / 触摸 / 蓝牙等补丁），
+#   内核树那份才是 apply-dts*.sh 打过补丁的完整版。覆盖会一夜回到解放前
+#   （2026-10-21 真踩过：覆盖后 DTB 校验大面积失败，UFS 都起不来）。
+#
+#   所以这里只做一件事：如果两边不一致，提醒一声，但不动内核树那份。
+#   板级 DTS 要改就直接改内核树那份（改完记得同步一份到 dts/ 留档）。
 python3 - "$BOARDSRC" "$DTS" <<'PY'
-import sys, shutil, os
+import sys, os
 
 boardsrc, dts = sys.argv[1], sys.argv[2]
-inc = '#include "cepheus-cam-ir-nfc.dtsi"'
 
-if os.path.isfile(boardsrc):
-    new = open(boardsrc).read()
-    old = open(dts).read() if os.path.isfile(dts) else ""
-
-    # 内核树那份末尾可能带着脚本追加的 include，同步后要保证它还在
-    if inc not in new:
-        new = new.rstrip("\n") + "\n\n" + inc + "\n"
-
-    if new.strip() != old.strip():
-        if os.path.isfile(dts):
-            shutil.copyfile(dts, dts + ".bak-boarddts")
-        open(dts, "w").write(new)
-        print("OK 板级 DTS 已同步（仓库 dts/ -> 内核树）")
-    else:
-        print("OK 板级 DTS 两边一致（不动）")
-else:
-    print("WARN 仓库里没有 dts/sm8150-xiaomi-cepheus.dts，跳过同步")
+if os.path.isfile(boardsrc) and os.path.isfile(dts):
+    a = open(boardsrc).read().strip()
+    b = open(dts).read().strip()
+    if a != b:
+        print("WARN 仓库 dts/ 与内核树的板级 DTS 不一致（不同步是正常的：内核树那份带补丁）")
+        print("     改板级 DTS 请直接改内核树那份，改完可复制回 dts/ 留档。")
 PY
 
 if grep -q 'cepheus-cam-ir-nfc.dtsi' "$DTS"; then

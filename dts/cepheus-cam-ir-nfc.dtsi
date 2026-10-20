@@ -437,9 +437,6 @@
 		 */
 		VA-supply = <&vreg_s4a_1p8>;
 		VP-supply = <&vreg_bob>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&sec_mi2s_active>;
-
 		reset-gpios = <&tlmm 89 GPIO_ACTIVE_HIGH>;
 		interrupt-parent = <&tlmm>;
 		interrupts = <10 IRQ_TYPE_LEVEL_LOW>;
