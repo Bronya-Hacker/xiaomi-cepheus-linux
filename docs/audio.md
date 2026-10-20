@@ -541,3 +541,58 @@ cs35l41 0-0040: Error applying setting, reverse things back
 - **就是这行保留把 MI2S 引脚锁死了**。
 
 修法：去掉 `<126 4>`（只留 `<0 4>`）。
+
+## 追加9：声卡起不来的真凶是 q6asm_dai 没自动加载（2026-10-21 04:50）
+
+### 现象
+
+```
+platform sound: deferred probe pending: snd-sm8150: MultiMedia1:
+                error getting cpu dai name
+```
+
+声卡一直 registered 不了。一度怀疑是 DTB 写错。
+
+### 真因
+
+`q6asm_dai` 模块**没有自动加载**。`apr-service@7:dais` 这个平台设备的 modalias
+没有触发 udev 去 modprobe 它，于是声卡注册时找不到 "MultiMedia1" 这个 CPU DAI。
+
+手动 `modprobe q6asm_dai` 之后，声卡立刻注册，**1032 个混音器控件**全部出现。
+
+### 修复
+
+`payload/etc/modules-load.d/mi9-audio.conf`：按依赖顺序显式列出整条音频模块链
+（snd 核心 → q6core/q6afe/q6asm/q6adm/q6routing → SLIMbus+WCD9340 → CS35L41 → sm8150）。
+
+### 顺带：ir-spi 开机 modprobe 报 Exec format error
+
+但 `insmod` 同一个文件却成功（`rc rc0: lirc_dev: driver ir-spi registered`，
+`/dev/lirc0` 出现）。vermagic 完全一致（`6.17.0-sm8150 SMP preempt mod_unload aarch64`），
+属于 modprobe 的模块查找路径问题，不是模块本身坏。
+
+---
+
+## ★★ 极其重要：删掉 `gpio-reserved-ranges` 里的 `<126 4>` 会让手机起不来
+
+今天为了给功放腾出 secondary MI2S 的 126-129，我把板级 DTS 里的
+
+```dts
+gpio-reserved-ranges = <0 4>, <126 4>;
+```
+
+改成了 `<0 4>`。结果**刷进去直接起不来**（不进 fastboot、没有网络、没有串口输出）。
+
+实测对照（同一次 kernelfat、只换 boot）：
+
+| boot 里的保留 | 结果 |
+|---|---|
+| `<0 4>, <126 4>`（原样） | ✅ 正常启动 |
+| `<0 4>`（去掉 126-129） | ❌ 起不来 |
+
+这也解释了为什么主线所有 sm8150 板子（mtp / hdk / surface-duo / oneplus / sony）
+都写着 `<126 4>` —— **这 4 个脚在这颗 SoC 上被保留是有原因的**
+（大概率是 UFS / 电源相关，被别的东西用着）。
+
+**结论：扬声器走 secondary MI2S 这条路，在"保留不能去掉"的前提下走不通。**
+要继续攻扬声器，得换个思路（例如查这 4 个脚到底被谁用、或者确认功放是否有其它输入路径）。
