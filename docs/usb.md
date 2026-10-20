@@ -68,21 +68,32 @@ USB 口接在 **PM8150B** 的 Type-C 上（不是独立 Type-C 控制器）：
 
 ## 待验证：Host 模式
 
-当前 `usb_role_switch` 类设备存在（`/sys/class/usb_role/a600000.usb-role-switch`），
-但目录里没有 `role` 属性，说明 tcpm 还没真正接管切换。
+当前 `usb_role_switch` 类设备存在（`/sys/class/usb_role/a600000.usb-role-switch`）。
 
-**验证方法**：把电脑那根线拔掉，用 USB-C OTG 转接头接一个 U 盘/鼠标，然后看：
+★ **别被 "没有 role 属性" 误导**：dwc3 注册 role switch 时没有把
+`allow_userspace_control` 设为 true（只有 meson/rtk 那些驱动才设），而
+`usb_role_switch_is_visible()` 只在 `allow_userspace_control` 为真时才导出
+`role` 属性。所以 **dwc3 的 role switch 天生就没有 role 属性**，
+不能据此判断切换有没有接上。
+
+要看切换有没有真的发生，看这两个更靠谱：
+- `cat /sys/class/udc/a600000.usb/state`（`configured` = 还在设备模式）
+- 插上 OTG 设备后 `ls /sys/bus/usb/devices/` 是否出现新设备
+
+**验证方法**：拔掉连电脑的线，用 USB-C OTG 转接头接 U 盘/鼠标，看：
 
 ```sh
-dmesg | tail            # 期望出现 "new high-speed USB device"
-lsusb                   # 期望列出外设
-cat /sys/class/typec/port0/power_role   # 期望变成 source
+mi9-usb                 # 一体式状态
+dmesg | tail            # 期望 "new high-speed USB device"
+ls /sys/bus/usb/devices/ # 期望有设备
+cat /sys/class/typec/port0/data_role
 ```
 
-如果一直不切换，下一步查：
-- `fwnode_usb_role_switch_get()` 没能把 connector 的 port 关联到 dwc3 的
-  role switch（dwc3 注册时用的是 `usb@a600000` 节点，而 graph 连的是它下面的
-  `usb_1_dwc3_hs` endpoint）—— 可能要显式加 `usb-role-switch` 连接属性，
-  或改成用 `role-switch-default-mode = "host"` 强制。
-- 也可以先用 `dr_mode = "host"` 单独验证 Host 控制器 + VBUS 是否真的能工作
-  （注意：那样 USB 网卡会消失，改用 WiFi `192.168.31.177` 连）。
+如果一直不切换，下一步：
+- 试 `HOST-boot-cepheus.img`（`dr_mode = "host"` 写死），单独验证
+  「Host 控制器 + VBUS 供电」这条链路。刷它之后 USB 网卡消失，改用 WiFi
+  `192.168.31.177`（已验证可连）；要回退就长按电源 → fastboot → 刷
+  `OTG-boot-cepheus.img`。
+- 若 host 模式能看到 xhci 并枚举出设备，说明硬件没问题，问题只在
+  tcpm→dwc3 的角色联动（graph 连接 / fwnode 匹配）。
+
