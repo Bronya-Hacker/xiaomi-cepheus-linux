@@ -512,3 +512,32 @@ valid_mask 之外 → pinctrl 框架 `ops->request` 走 `gpiochip_line_is_valid(
 
 ★ 注意：这属于改动主线 pinctrl 定义，要确认不影响其它功能（这几个脚只有
 sec_mi2s / qup2 / phase_flag 等，加 gpio 位只是允许 GPIO 用法）。
+
+### ★★ 真凶：我们自己的 DTS 把功放的 MI2S 引脚保留掉了（2026-10-21 02:50）
+
+绕了一大圈，根因其实在我们自己的板级 DTS 里：
+
+```dts
+/* dts/sm8150-xiaomi-cepheus.dts 第 538 行（原） */
+gpio-reserved-ranges = <0 4>, <126 4>;
+```
+
+`<126 4>` 把 **126-129 四个脚从 gpiochip 的可用范围里剔除**，于是 pinctrl
+框架申请它们时必然 `-EINVAL`：
+
+```
+sm8150-pinctrl: error -EINVAL: pin-126 (0-0040)
+cs35l41 0-0040: Error applying setting, reverse things back
+```
+
+这多半是当初照抄主线 sm8150 板子（mtp / hdk / surface-duo 都写了 `<126 4>`）
+带进来的——**那些板子不用 secondary MI2S，但小米 9 的功放 CS35L41 就接在
+126-129 上**（原厂 DT 里它们就是 `function = "sec_mi2s"`）。
+
+所以：
+- 不是主线 pinctrl 的限制；
+- 不是功放坏了（OTP boot 成功、ID `35a40` 读得到）；
+- 不是缺固件；
+- **就是这行保留把 MI2S 引脚锁死了**。
+
+修法：去掉 `<126 4>`（只留 `<0 4>`）。

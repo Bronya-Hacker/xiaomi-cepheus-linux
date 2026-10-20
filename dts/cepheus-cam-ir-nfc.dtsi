@@ -437,7 +437,6 @@
 		 */
 		VA-supply = <&vreg_s4a_1p8>;
 		VP-supply = <&vreg_bob>;
-		/* MI2S 引脚复用挂在功放上：万一 mux 失败也只影响功放，不会拖垮声卡注册 */
 		pinctrl-names = "default";
 		pinctrl-0 = <&sec_mi2s_active>;
 

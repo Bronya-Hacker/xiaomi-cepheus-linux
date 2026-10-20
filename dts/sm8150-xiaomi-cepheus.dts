@@ -535,7 +535,11 @@
 
 &tlmm {
 	/* gpios 0..3 are NFC spi, gpios 126..129 are FP spi */
-	gpio-reserved-ranges = <0 4>, <126 4>;
+	/* ★ 原来这里保留了 <126 4>（照抄主线 sm8150 板子的写法），但小米9 的
+	 * 扬声器功放 CS35L41 就接在 secondary MI2S 的 126-129 上，保留会让
+	 * pinctrl 无法申请这些脚（pin-126 -EINVAL）→ MI2S 永远配不上。
+	 */
+	gpio-reserved-ranges = <0 4>;
 
 	ai_key_pin_a: ai-key-pin-active {
 		pins = "gpio97";
