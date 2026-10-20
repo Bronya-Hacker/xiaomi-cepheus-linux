@@ -438,3 +438,50 @@ sensorDriverData → powerSetting, resolutionInfo, resolutionData,
 
 camcc 补 GDSC → DT 加 cci + imx586 节点（电源/GPIO/MCLK）→ 重建 boot 刷机 →
 `modprobe imx586` 看 i2c 上能否读到 ID（0x0186）→ 接 csiphy1 → 出第一帧。
+
+## 十五、M3 上真机的完整排查记录（2026-10-20 下午）
+
+目标：让 mainline 侧把 IMX586 认出来。结论先说：**SoC 侧全部打通，模组不应答。**
+
+### 15.1 已经验证正确的部分（真机）
+
+| 项 | 证据 |
+|---|---|
+| CCI 控制器 | `i2c-qcom-cci` 加 `qcom,sm8150-cci`；CCI1（`0xac4b000`, IRQ 271）探测成功，`i2c-0/1/2` 出现 |
+| CCI 引脚 | GPIO 31–34 mux 成 `cci_i2c`，`pinmux-pins` 里由 `ac4b000.cci` 持有；**EEPROM 0x51 能 ACK** |
+| 传感器引脚 | GPIO14 `cam_mclk`、GPIO30 复位、GPIO59 VDIG 开关，全部被 `2-001a` 持有 |
+| 主摄时钟 | 原厂 `cam-sensor@0` 用 camcc 索引 **0x4a = 74 = CAM_CC_MCLK1_CLK**（走 GPIO14）。之前误用 MCLK0（走 GPIO13）→ 已改 |
+| 电源 | VANA=`pm8150_s5` 1.904V、VDIG=`pm8150_l17` 2.856V、VIO=`camera_viodd_ldo`(GPIO132) 1.8V，三路实测使能 |
+| 时钟域 | camcc 补了 6 个 GDSC（bps/ipe_0/ipe_1/ife_0/ife_1/titan_top），`pm_genpd` 可见 |
+
+### 15.2 仍然失败的现象
+
+```
+i2cdump: bus 1 addr 0x1a ret=-110 (ETIMEDOUT)
+i2cdump: bus 2 addr 0x1a ret=-6   (ENXIO, 无 ACK)
+i2cscan: bus 2 addr 0x51 ACK      (同总线 EEPROM 正常)
+```
+
+试过但无效：复位极性（两种）、VDIG 开关极性（两种）、上电顺序（4 种组合）、
+延时加长到 100ms、`titan_top_gdsc` 设 ALWAYS_ON、两条 CCI master 都扫、
+全地址段扫描（只 0x51 应答）。
+
+### 15.3 `.bin` 容器格式（已解出，可复用）
+
+`com.qti.sensormodule.*.bin` 的节点是 **72 字节**：
+
+```
+char name[40]; u32 magic=0xffffffff; u32 zero;
+u64 data_offset; u64 data_size; u64 id;
+```
+
+据此已能枚举 **4347 个节点 / 94 种字段**，包括 1387 组 `slaveAddr/registerData/delayUs`
+（即完整的寄存器序列）、`resolutionData`、HDR 信息等。
+
+**重要**：`powerUpSequence` / `powerDownSequence` 两个节点 `size = 0`，
+说明这颗传感器的上电序列**不在 .bin 里**，而在厂商内核驱动中。
+
+### 15.4 下一步
+
+模组不应答已经排除 SoC 侧所有可能，剩下的是"模组到底靠什么上电"——
+需要原理图/点位图，或从厂商内核二进制里找 `cam_sensor` 的 power-up 表。
