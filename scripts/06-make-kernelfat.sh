@@ -61,7 +61,7 @@ mcopy -i "$IMG" "$OUT/Image"          ::/Image
 #                             不带时 USB PHY/UDC 可能因为 supplier 没 probe 上而不工作
 #   clk_ignore_unused         不用的一开始就关时钟，避免某些时钟被误关
 #   fbcon=font:TER16x32       屏幕上字大一点
-#   modprobe.blacklist=q6asm_dai
+#  
 #                             ★ 音频的 ASM DAI 驱动找不到 DTS 里的 dais 子节点，
 #                               probe 必失败并刷两条 err
 #                               （"No dais found in DT" + "probe with driver q6asm-dai failed with error -22"）。
@@ -148,7 +148,7 @@ mcopy -i "$IMG" "$OUT/Image"          ::/Image
 #   代价：未知 stream 也放行（安全上宽松一点），等以后真上 DRM(msm)+面板驱动、
 #         让显示子系统自己认领 stream 之后，就可以删掉这一项。
 cat > "$OUT/startup.nsh" <<'EOF'
-fs3:\Image console=tty0 loglevel=7 log_buf_len=4M fw_devlink=off clk_ignore_unused regulator_ignore_unused pd_ignore_unused arm-smmu.disable_bypass=0 initcall_blacklist=disp_cc_sm8250_driver_init iomem=relaxed consoleblank=0 fbcon=font:TER16x32 modprobe.blacklist=q6asm_dai
+fs3:\Image console=tty0 loglevel=7 log_buf_len=4M fw_devlink=off clk_ignore_unused regulator_ignore_unused pd_ignore_unused arm-smmu.disable_bypass=0 initcall_blacklist=disp_cc_sm8250_driver_init iomem=relaxed consoleblank=0 fbcon=font:TER16x32
 EOF
 mcopy -i "$IMG" "$OUT/startup.nsh" ::/startup.nsh
 

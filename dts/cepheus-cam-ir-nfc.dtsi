@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
+#include <dt-bindings/sound/qcom,q6afe.h>
+#include <dt-bindings/sound/qcom,q6asm.h>
+#include <dt-bindings/sound/qcom,wcd934x.h>
 /*
  * Xiaomi Mi 9 (cepheus) —— 相机 / 红外 / NFC 的板级补充
  *
@@ -206,4 +209,171 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&nfc_int_active &nfc_enable_active &nfc_firm_active>;
 	};
+};
+
+/* ================= 音频：WCD9340（原厂 tavil） ================= */
+/* 原厂接线：codec IRQ=GPIO123，复位=GPIO143（低有效复位，驱动自己控制）
+ * 电源：vdd-buck/tx/rx/io = pm8150 S4（1.8V），vdd-vbat/3v3 = BOB
+ */
+
+&tlmm {
+	wcd_intr_default: wcd-intr-default {
+		pins = "gpio123";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	wcd_rst_n_active: wcd-rst-n-active {
+		pins = "gpio143";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+};
+
+&slim {
+	status = "okay";
+
+	slim@1 {
+		reg = <1>;
+		#address-cells = <2>;
+		#size-cells = <0>;
+
+		wcd9340_ifd: ifd@0,0 {
+			compatible = "slim217,250";
+			reg = <0 0>;
+		};
+
+		wcd9340: codec@1,0 {
+			compatible = "slim217,250";
+			reg = <1 0>;
+			slim-ifc-dev = <&wcd9340_ifd>;
+
+			#sound-dai-cells = <1>;
+
+			interrupts-extended = <&tlmm 123 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-controller;
+			#interrupt-cells = <1>;
+
+			reset-gpios = <&tlmm 143 GPIO_ACTIVE_HIGH>;
+
+			clock-names = "extclk";
+			clocks = <&rpmhcc RPMH_LN_BB_CLK2>;
+			#clock-cells = <0>;
+			clock-frequency = <9600000>;
+			clock-output-names = "mclk";
+
+			pinctrl-names = "default";
+			pinctrl-0 = <&wcd_intr_default &wcd_rst_n_active>;
+
+			vdd-buck-supply = <&vreg_s4a_1p8>;
+			vdd-buck-sido-supply = <&vreg_s4a_1p8>;
+			vdd-tx-supply = <&vreg_s4a_1p8>;
+			vdd-rx-supply = <&vreg_s4a_1p8>;
+			vdd-io-supply = <&vreg_s4a_1p8>;
+			vdd-micbias-supply = <&vreg_s4a_1p8>;
+			vdd-vbat-supply = <&vreg_bob>;
+
+			qcom,micbias1-microvolt = <1800000>;
+			qcom,micbias2-microvolt = <1800000>;
+			qcom,micbias3-microvolt = <1800000>;
+			qcom,micbias4-microvolt = <1800000>;
+
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			wcdgpio: gpio-controller@42 {
+				compatible = "qcom,wcd9340-gpio";
+				gpio-controller;
+				#gpio-cells = <2>;
+				reg = <0x42 0x2>;
+			};
+
+			swm: soundwire@c85 {
+				compatible = "qcom,soundwire-v1.3.0";
+				reg = <0xc85 0x40>;
+				interrupts-extended = <&wcd9340 20>;
+
+				qcom,dout-ports = <6>;
+				qcom,din-ports = <2>;
+				qcom,ports-sinterval-low = /bits/ 8 <0x07 0x1f 0x3f 0x07 0x1f 0x3f 0x0f 0x0f>;
+				qcom,ports-offset1 = /bits/ 8 <0x01 0x02 0x0c 0x06 0x12 0x0d 0x07 0x0a>;
+				qcom,ports-offset2 = /bits/ 8 <0x00 0x00 0x1f 0x00 0x00 0x1f 0x00 0x00>;
+
+				#sound-dai-cells = <1>;
+				clocks = <&wcd9340>;
+				clock-names = "iface";
+				#address-cells = <2>;
+				#size-cells = <0>;
+			};
+		};
+	};
+};
+
+/* ================= 声卡 ================= */
+
+&sound {
+	compatible = "qcom,sm8150-sndcard";
+	model = "sm8150-tavil-snd-card";
+	status = "okay";
+
+	audio-routing =
+		"RX_BIAS", "MCLK",
+		"AMIC2", "MIC BIAS2",
+		"AMIC3", "MIC BIAS2",
+		"AMIC4", "MIC BIAS2",
+		"DMIC0", "MCLK",
+		"DMIC0", "MIC BIAS1",
+		"DMIC2", "MCLK",
+		"DMIC2", "MIC BIAS3";
+
+	mm1-dai-link {
+		link-name = "MultiMedia1";
+		cpu { sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA1>; };
+	};
+	mm2-dai-link {
+		link-name = "MultiMedia2";
+		cpu { sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA2>; };
+	};
+	mm3-dai-link {
+		link-name = "MultiMedia3";
+		cpu { sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA3>; };
+	};
+	mm4-dai-link {
+		link-name = "MultiMedia4";
+		cpu { sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA4>; };
+	};
+	mm5-dai-link {
+		link-name = "MultiMedia5";
+		cpu { sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA5>; };
+	};
+
+	slim-dai-link {
+		link-name = "SLIM Playback 1";
+		no-pcm;
+		codec { sound-dai = <&wcd9340 AIF1_PB>; };
+		cpu { sound-dai = <&q6afedai SLIMBUS_0_RX>; };
+		platform { sound-dai = <&q6routing>; };
+	};
+
+	slimcap-dai-link {
+		link-name = "SLIM Capture 1";
+		no-pcm;
+		codec { sound-dai = <&wcd9340 AIF1_CAP>; };
+		cpu { sound-dai = <&q6afedai SLIMBUS_0_TX>; };
+		platform { sound-dai = <&q6routing>; };
+	};
+};
+
+/* q6asm-dai 需要子节点，否则报 "No dais found in DT" */
+&q6asmdai {
+	dai@0 { reg = <MSM_FRONTEND_DAI_MULTIMEDIA1>; };
+	dai@1 { reg = <MSM_FRONTEND_DAI_MULTIMEDIA2>; };
+	dai@2 { reg = <MSM_FRONTEND_DAI_MULTIMEDIA3>; };
+	dai@3 { reg = <MSM_FRONTEND_DAI_MULTIMEDIA4>; };
+	dai@4 { reg = <MSM_FRONTEND_DAI_MULTIMEDIA5>; };
+	dai@5 { reg = <MSM_FRONTEND_DAI_MULTIMEDIA6>; };
+	dai@6 { reg = <MSM_FRONTEND_DAI_MULTIMEDIA7>; };
+	dai@7 { reg = <MSM_FRONTEND_DAI_MULTIMEDIA8>; };
 };
