@@ -12,7 +12,7 @@
 | 显示 | DRM/KMS（DPU+DSI 面板）+ 背光/亮度/刷新率 | ⚠️ 仅 `simple-framebuffer`（`/proc/fb` = `0 simple`），无 `/dev/dri` | 只有 fbcon 文本；无亮度调节、无 Wayland/X |
 | GPU | Adreno 640（msm/adreno + devfreq） | ❌ 无驱动、无 devfreq | 纯 CPU 渲染（本机无 GUI，影响小） |
 | 触摸 | FTS 驱动 + input 事件 + 手势 | ⚠️ 驱动 probe、`fts` input 节点已注册，但初始化报 `ERROR 800E0007` | 触摸大概率不可用（无 GUI 时影响小） |
-| 音频 | q6asm/q6afe + WCD9385 + 扬声器/听筒/麦克风 + UCM | ❌ 无 soundcard，`q6asm_dai` 仍在 cmdline 黑名单 | 完全无声音 |
+| 音频 | q6asm/q6afe + WCD9385 + 扬声器/听筒/麦克风 + UCM | 🟡 WCD9340（chip id 0x108）已认、声卡 `sm8150-tavil-snd-card` 注册、1240 个混音控件、耳机检测正常、5 个前端 PCM；**播放链路通**（`mi9-audio tone` 跑完零错误）；采集能跑但全是 0 | **SLIMbus 数据面不搬数据**：codec 寄存器都配好了（TX 口已使能）但 SoC 侧收不到；`RX_MIX_TX0` 内部环回也录不到，说明与麦克风无关。扬声器 WSA881x 能枚举、寄存器读不了（SWR link 连不上） |
 | 蜂窝 | modem 固件 + IPA/rmnet + ModemManager + SIM/通话/短信/数据 | ❌ `remoteproc modem=running`，但无 `/dev/wwan`、无 IPA/rmnet | 完全不可用（暂缓） |
 | WiFi | 2.4G+5G、WPA3、接近线速、挂起恢复 | ✅ 2.4G 已连；iperf3 实测 **60–72 Mbit/s**；5G 收发已验证（自建 AP 在 ch44/ch149 均能被 PC 关联） | 家里路由器 5G 不回应本机认证（AP 侧）；未验证 WPA3 / 挂起恢复 |
 | 蓝牙 | BR/EDR + BLE、配对/重连、A2DP/HID、开机自启 | ✅ `hci0 UP RUNNING`、BLE 扫描通过、bluez 开机自启 | A2DP 不可用（无音频子系统）；长稳测试见 §四 |
@@ -28,9 +28,11 @@
 | USB device | RNDIS/ECM/NCM + ADB/MTP | ✅ RNDIS/NCM + `ttyGS0` 串口控制台 | 无 ADB/MTP（不需要） |
 | USB Host / OTG | 双角色 + 供电管理 | ❌ 仅 gadget，无 `usb_role`/`extcon` | 不能接 U 盘/键鼠/网卡 |
 | Type-C | tcpm + 翻转/角色/ALT mode | ❌ 无 `typec` 类 | 无 |
-| 传感器 | 加速度/陀螺/ALS/气压/霍尔 | ❌ `iio` 只有 3 个 PMIC ADC | 无 |
-| 相机 | CAMSS/CSI + sensor + libcamera | ❌ 无 `/dev/video*` | 无 |
-| 指纹 / NFC / 红外 / 马达 / LED | 各自驱动 | ❌ 全无（无 `/sys/class/leds`） | 无 |
+| 传感器 | 加速度/陀螺/ALS/气压/霍尔 | ❌ `iio` 只有 3 个 PMIC ADC | **传感器挂在 SLPI 上**（原厂 DT 有 `qcom,slpi_qrtr`/`slpi-pinctrl`），I2C 总线归 SLPI 管，AP 侧看不到；要用得先起 SLPI remoteproc + 实现 SSC 协议，约等于重做一个子系统 |
+| 相机 | CAMSS/CSI + sensor + libcamera | ❌ 无 `/dev/video*` | 已归档：SoC 侧全通，模组从不应答（`archive/camera/`） |
+| 红外发射 | `ir-spi-led` + `/dev/lirc0` | ✅ SPI1（QUP 0x884000），GPIO114-117；`ir-ctl --scancode nec:0x20df10ef` 实测发出 | 良好（`mi9-audio` 同款工具链） |
+| NFC | NXP NCI + 轮询/读卡 | 🟡 芯片在 i2c@a84000/0x28：驱动绑定、`nfc0` 注册、中断正常、手动拉 VEN 后 I2C 应答；**NCI 复位超时**，读回全 0 | 疑似缺固件；自写工具 `mi9-nfc-poll` 可轮询但设备起不来 |
+| 指纹 / 马达 / LED | 各自驱动 | ❌ 无 | 无 |
 | 存储 | UFS HS-G4 + 健康监控 | ✅ 系统跑在 `/dev/sda31`（110G） | 良好 |
 | 温控 | 多热区 + passive/critical trip | ✅ 27 个热区，passive 90/95 °C，critical 110 °C | 良好 |
 
