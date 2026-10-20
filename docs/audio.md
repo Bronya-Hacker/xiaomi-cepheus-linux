@@ -268,3 +268,44 @@ port 通道怎么对应（可能是 `128+port` 或需要 `wcd934x_slim_set_chann
 **数据面（SLIMbus 音频通道真正搬数据）不工作**，而且与通道基址无关。
 下一步需要对照 vendor 的 SLIMbus 通道分配表，或用逻辑分析仪抓 SLIMbus 波形，
 确认 codec 是否真的把数据推上了总线。
+
+## 追加6：内部环回实验 —— 决定性证据
+
+### 端口编号是交错的（我之前的判断错了）
+
+```c
+#define SLIMBUS_0_RX  2
+#define SLIMBUS_0_TX  3
+#define SLIMBUS_1_RX  4
+#define SLIMBUS_1_TX  5
+```
+
+所以播放是 id=2（SLIMBUS_0_RX）、录音是 id=3（SLIMBUS_0_TX），
+我原来用 `id >= SLIMBUS_0_RX && id <= SLIMBUS_6_RX` 判断方向是错的
+（id=3 被当成 RX）。已改成按奇偶判断：
+
+```c
+if (((dai->id - SLIMBUS_0_RX) % 2) == 0)   /* RX */
+```
+
+### 实验：codec 内部环回
+
+把采集源设成 codec 内部的 `RX_MIX_TX0`（把播放混音直接接到采集口），
+同时播放 440 Hz，再录音：
+
+```
+内部环回录音 -> RMS 0  峰值 0
+```
+
+codec 的 SLIM TX 端口寄存器确认已使能（`0x50 = 0x05`，water mark 12 字节 +
+enable；通道掩码 `0x100 = 0x01`）。
+
+### 结论
+
+**SoC 侧 SLIMbus 接收方向（ADSP AFE 从总线取数据）没有工作**，
+与麦克风、与通道基址（0/16/32/128 全试过）都无关。
+这解释了为什么播放"能跑"但听不到、录音"在跑"但全是 0。
+
+主线 `slim-ngd` 只实现了控制面的 `enable_stream`（发 DEF_ACT_CHAN），
+而 vendor 的音频走的是 SLIMbus **共享通道**那一套，两边机制可能不完全等价。
+要继续需要：SLIMbus 抓包确认 codec 是否真的在推数据，或补上共享通道支持。

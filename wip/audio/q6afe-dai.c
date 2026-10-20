@@ -50,7 +50,10 @@ static int q6slim_hw_params(struct snd_pcm_substream *substream,
 	slim->sample_rate = params_rate(params);
 	slim->num_channels = params_channels(params);
 	slim->slimbus_dev_id = 1;	/* AFE_SLIMBUS_DEVICE_1 */
-	if (dai->id >= SLIMBUS_0_RX && dai->id <= SLIMBUS_6_RX) {
+	/* 端口编号是交错的：SLIMBUS_0_RX=2, SLIMBUS_0_TX=3, ...，
+	 * 不能用区间判断，得看奇偶。
+	 */
+	if (((dai->id - SLIMBUS_0_RX) % 2) == 0) {
 		slim->ch_mapping[0] = rx_ch_base;
 		slim->ch_mapping[1] = rx_ch_base + 1;
 		slim->ch_mapping[2] = rx_ch_base + 2;
