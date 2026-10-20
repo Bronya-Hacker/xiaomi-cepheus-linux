@@ -41,7 +41,8 @@ UEFI (edk2-msm) boot, WiFi + Bluetooth working, no GUI, self-healing systemd uni
 - 发布：`scripts/11-release.sh` 一条命令出包 + 上传 + 服务端 digest 反证 + 回写文档；`scripts/12-release-verify.sh`（CI 每周）对账线上资产与仓库记录的哈希
 - 电源：`pm8150b-charger` + `qcom-battery`（电量/电压/电流/温度/状态），支持软件停充
 
-**不启用**：GUI、Wayland/X、GPU 加速、音频、相机、蜂窝数据、OTG、传感器。
+**不启用**：GUI、Wayland/X、GPU 加速、相机、蜂窝数据、OTG。
+（音频、NFC 的**控制面**已经打通，数据面还差最后一步，详见 `docs/audio.md` 与 `docs/ir-nfc.md`。）
 
 ## 当前状态
 
@@ -55,10 +56,15 @@ UEFI (edk2-msm) boot, WiFi + Bluetooth working, no GUI, self-healing systemd uni
 | USB 网络 / 串口 | ✅ | RNDIS/NCM + `ttyGS0` 控制台 |
 | RTC | ✅ | `rtc-pm8xxx` + nvmem offset，掉电走时正常 |
 | 充电 / 电量 | ✅ | `pm8150b-charger` / `qcom-battery`，软件停充已验证 |
-| 硬件看门狗 | ✅ | `qcom_wdt` 60 s，实测能自动复位 |
+| 硬件看门狗 | ✅ | `qcom_wdt`，systemd 30 s 喂狗，卡死自动重启 |
+| 红外发射 | ✅ | `ir-spi-led`（SPI1 / QUP 0x884000），`/dev/lirc0`，`ir-ctl --scancode` 实测发出 |
+| NFC | 🟡 | NXP NQ：`nfc0` 注册、驱动绑定、中断正常、芯片 I2C 应答；**NCI 复位超时**（疑似缺固件） |
+| 音频 | 🟡 | WCD9340（chip id 0x108）+ 声卡 `sm8150-tavil-snd-card` + 耳机检测 + 5 个 PCM；**播放链路通**（`mi9-audio tone` 零错误），但 SLIMbus 数据面不搬数据（录音全 0）；扬声器 WSA881x 已枚举、寄存器读不了 |
 | 显示 | ⚠️ | 仅 `simple-framebuffer` 文本控制台（无 DRM/GPU） |
 | 触摸 | ⚠️ | 驱动 probe，但初始化报 `800E0007`（无 GUI 影响小） |
-| 音频 / 相机 / 蜂窝 / 传感器 / 指纹 / NFC / 红外 | ❌ | 未移植 |
+| 相机 | ❌ | 已归档：SoC 侧全通，但模组从不应答（`archive/camera/`） |
+| 传感器 | ❌ | 挂在 **SLPI** 上（`qcom,slpi_qrtr`），AP 侧访问不到；需要 SLPI + SSC，约等于重做一个子系统 |
+| 蜂窝 / 指纹 | ❌ | 未移植 |
 | USB Host / OTG / Type-C | ❌ | 仅 device 模式 |
 
 完整对照表（含"成熟移植应有的样子"和复现命令）：[`docs/hardware-status.md`](docs/hardware-status.md)。
