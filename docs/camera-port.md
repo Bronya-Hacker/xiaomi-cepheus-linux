@@ -327,3 +327,29 @@ dmesg: vfe0/vfe1 各 "6 clocks ok"、IRQ 183/184，无 oops
 - M3 才是真正的"能出图"：给 IMX586（主摄）写/移植 `v4l2_subdev` 驱动，
   需要 i2c 地址、上电时序、PLL 与模式寄存器表 —— 下游 `techpack/camera` 里有现成的。
 - 电源管理（VFE 的 per-VFE 电源域）暂时用 `has_pd=false` 绕开，等出图后再补。
+
+## 十二、M3 的前置调查（2026-10-20 13:10）：传感器驱动缺"表"
+
+结论：**M3 卡在数据，不卡在代码。**
+
+- 主线 6.17 树里 `grep -r imx586` → **零结果**；同族只有 `imx412`（12MP，结构可参考，但寄存器表完全不同）。
+- 下游 `camera_v2/sensor/` 只有框架（`msm_sensor*.c`），**没有 imx586.c**；
+  新相机栈 `drivers/media/platform/msm/camera/cam_sensor_module/cam_sensor/` 同样只有框架。
+  也就是说小米公开的内核源码**不含**传感器驱动（通常随 camera blobs 走 proprietary 包）。
+- 本机也没有可反编译的 Android camera HAL（早被覆盖成 Ubuntu 了）。
+
+**没有传感器初始化表（PLL、模式、寄存器序列）就写不出能出图的驱动**，这不是靠猜能补的。
+
+### 12.1 可选的几条路
+
+1. **找表**：任何一份 IMX586 的公开初始化序列都行 —— 比如别的厂商的 kernel 源码、
+   树莓派/libcamera 类项目、或同款传感器的开源移植。拿到表后写驱动是 3–5 天的活。
+2. **先验证链路**：camss 的 CSID 带 `V4L2_CID_TEST_PATTERN` 测试图案发生器
+   （`camss-csid.c`），理论上可以在没有传感器时验证 CSID→VFE 的采集。
+   但 CSID 通常需要 CSI PHY 的时钟做参考，能否独立跑通要试（半小时到一天）。
+3. **换硬件路线**：USB UVC（要 host 模式 + 占用 USB 口供电，用户已排除）或 IP 摄像头（零驱动）。
+
+### 12.2 现状
+
+时钟（M1）与采集管线（M2）都已打通并提交：`/dev/media0` + `/dev/video0..7` 在设备上。
+再往下就是"数据"问题，没有表就只能停在这里。
