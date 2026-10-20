@@ -12,3 +12,15 @@
 > "我说了 除非我喊停不然你就继续，把这个记住"
 
 唯一可以等他的时候：确实需要他动手（进 fastboot、按电源键等），或者他喊停。
+
+## 需要用户动手时的提醒方式
+
+- **发声音提示**（Windows TTS 中文女声，比蜂鸣好认）：
+  ```powershell
+  Add-Type -AssemblyName System.Speech
+  $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+  $s.SelectVoice('Microsoft Huihui Desktop'); $s.Rate = 2
+  $s.Speak('需要你操作一下啦，请把手机进入 fastboot 哦')
+  ```
+- 然后**停下来等他**，明确说明要按什么键。
+- 他做完会说一声（"好了"），我立刻继续，不要反复确认。
