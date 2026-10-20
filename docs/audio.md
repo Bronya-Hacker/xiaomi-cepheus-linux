@@ -309,3 +309,28 @@ enable；通道掩码 `0x100 = 0x01`）。
 主线 `slim-ngd` 只实现了控制面的 `enable_stream`（发 DEF_ACT_CHAN），
 而 vendor 的音频走的是 SLIMbus **共享通道**那一套，两边机制可能不完全等价。
 要继续需要：SLIMbus 抓包确认 codec 是否真的在推数据，或补上共享通道支持。
+
+## 追加7：把 codec 通道号改到共享区（128+）—— 无效
+
+### 想法
+
+SLIMbus 的 0–127 是「非共享通道」，128–255 才是「共享通道」。音频数据通常
+必须走共享通道才能被 SoC 侧的 SLIMbus 硬件路由到 ADSP 的 AFE 端口。
+主线 `wcd934x_set_channel_map()` 用的是 framework 给的通道号（0 起），
+于是试着在驱动里统一加 128。
+
+### 结果
+
+- codec 驱动改完（纯模块，重启生效）后做 `RX_MIX_TX0` 内部环回录音：
+  **仍然是 RMS 0**；
+- 而且采集的 prepare 直接报错：
+  `q6asm_dai_prepare: stream reg failed ret:-22`
+  （`q6routing_stream_open` 失败）；
+- 普通播放不受影响。
+
+说明把通道号推到 128+ 反而让 ADM 路由注册失败，方向不对。已回退。
+
+### 结论
+
+通道编号不是这层的原因。数据面问题要么在 ADSP 的 AFE←SLIMbus 硬件配置，
+要么需要 vendor 的 SLIMbus 通道分配表。继续盲试的性价比已经很低。
