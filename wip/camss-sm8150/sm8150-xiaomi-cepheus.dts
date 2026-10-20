@@ -1157,7 +1157,7 @@
 		reset-gpios = <&tlmm 30 GPIO_ACTIVE_HIGH>;
 		pwdn-gpios = <&tlmm 59 GPIO_ACTIVE_HIGH>;
 
-		clocks = <&camcc CAM_CC_MCLK0_CLK>;
+		clocks = <&camcc CAM_CC_MCLK1_CLK>;
 		clock-names = "xvclk";
 
 		pinctrl-names = "default", "suspend";

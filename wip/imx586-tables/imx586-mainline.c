@@ -128,8 +128,8 @@
 #define IMX586_NAME			"imx586"
 
 static const char * const imx586_supply_names[] = {
+	"dovdd",	/* Digital I/O power (先上) */
 	"avdd",		/* Analog power */
-	"dovdd",	/* Digital I/O power */
 	"dvdd",		/* Digital core power */
 };
 
@@ -1323,6 +1323,10 @@ static int __imx586_power_on(struct imx586 *imx586)
 	if (!IS_ERR(imx586->reset_gpio))
 		gpiod_set_value_cansleep(imx586->reset_gpio, 0);
 
+	if (!IS_ERR(imx586->pwdn_gpio))
+		gpiod_set_value_cansleep(imx586->pwdn_gpio, 1);
+	usleep_range(1000, 2000);
+
 	ret = regulator_bulk_enable(IMX586_NUM_SUPPLIES, imx586->supplies);
 	if (ret < 0) {
 		dev_err(dev, "Failed to enable regulators\n");
@@ -1337,10 +1341,10 @@ static int __imx586_power_on(struct imx586 *imx586)
 		gpiod_set_value_cansleep(imx586->reset_gpio, 1);
 
 	/* need wait 8ms to set register */
-	usleep_range(8000, 10000);
+	usleep_range(60000, 70000);
 
 	/* 8192 cycles prior to first SCCB transaction */
-	delay_us = imx586_cal_delay(8192);
+	delay_us = imx586_cal_delay(8192) + 100000;
 	usleep_range(delay_us, delay_us * 2);
 
 	return 0;
@@ -1355,7 +1359,7 @@ static void __imx586_power_off(struct imx586 *imx586)
 {
 
 	if (!IS_ERR(imx586->pwdn_gpio))
-		gpiod_set_value_cansleep(imx586->pwdn_gpio, 0);
+		gpiod_set_value_cansleep(imx586->pwdn_gpio, 1);
 	clk_disable_unprepare(imx586->xvclk);
 	if (!IS_ERR(imx586->reset_gpio))
 		gpiod_set_value_cansleep(imx586->reset_gpio, 0);
@@ -1783,10 +1787,8 @@ static int imx586_probe(struct i2c_client *client)
 		goto err_free_handler;
 
 	ret = imx586_check_sensor_id(imx586, client);
-	if (ret) {
-		dev_err(dev, "id check failed, keeping power/clock on for debug\n");
-		return -ENODEV;
-	}
+	if (ret)
+		dev_err(dev, "id check failed -- continuing anyway (debug)\n");
 
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
 	sd->internal_ops = &imx586_internal_ops;
@@ -1808,9 +1810,8 @@ static int imx586_probe(struct i2c_client *client)
 		goto err_clean_entity;
 	}
 
-	pm_runtime_set_active(dev);
-	pm_runtime_enable(dev);
-	pm_runtime_idle(dev);
+	/* debug: 不启用 runtime PM，保持供电以便探测 */
+	dev_info(dev, "PINDBG runtime pm skipped (debug)\n");
 
 	return 0;
 
