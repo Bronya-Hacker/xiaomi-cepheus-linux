@@ -171,3 +171,49 @@ DT 配什么都会被它覆盖。
 - **NFC 的 IRQ 必须用边沿触发**，绝不能用 level；
 - **改驱动模块后要升 payload 版本号**，否则刷 kernelfat 不会生效
   （`/etc/wifi-cfg.ver` 不匹配才触发解压）。
+
+## 结论：这颗是 NXP SN100U，主线驱动不支持（2026-10-20 23:00）
+
+之前一直以为 NCI 不工作是因为缺固件或时序问题。挂载原厂 **vendor 分区**
+（`/dev/sde53`，只读）之后找到答案：
+
+```
+/mnt/vendor/etc/libnfc-nxp.conf:
+  NXP_NFC_DEV_NODE="/dev/nq-nci"
+  NXP_FW_NAME="libsn100u_fw.so"
+/mnt/vendor/lib/libsn100u_fw.so   （207 KB ELF，aarch64 共享库）
+```
+
+### 说明
+
+- 芯片是 **NXP SN100U**，不是主线 `nxp-nci` 驱动覆盖的 PN5xx 系列
+  （PN544/547/548/553/80T）；
+- 原厂用的是自家驱动 `qcom,nq-nci`，通过 `/dev/nq-nci` 暴露给 HAL，
+  固件由 `libsn100u_fw.so` 这个 HAL 库在用户态下发；
+- 主线 `nxp-nci` 的固件下载协议（`0xF0/0xF1/0xE0/0xC0/0xA2`）是 PN5xx 那一套，
+  **和 SN100 不兼容**。
+
+### 这解释了所有现象
+
+| 现象 | 原因 |
+|---|---|
+| I2C 0x28 能 ACK | SN100 的 boot ROM 在应答 |
+| 发 CORE_RESET 后 IRQ 变高 | ROM 收到了命令 |
+| 读回全是 0x00 | ROM 不做标准 NCI 会话，等 HAL 下发固件 |
+| 主线上电/时序怎么调都没用 | 驱动根本不匹配这个芯片 |
+
+### 结论与代价
+
+要在主线用上 NFC，需要：
+
+1. 移植 SN100 驱动（I2C + NCI 2.0 + 固件下载协议）；
+2. 从 `libsn100u_fw.so` 里抽出固件镜像（ELF 里嵌的二进制块）；
+3. 用户态用 `nfctool`/neard 或自写工具对接。
+
+**这是和相机同量级的工程**，不是"调通"就能解决的。
+
+### vendor 分区可以读（意外收获）
+
+`/dev/sde53`（vendor）和 `/dev/sde54`（system）都还在，只读挂载即可访问，
+里面还有相机、音频（`cs35l41` 功放固件）、蓝牙等一堆厂商文件——
+以后挖别的驱动参数时可以再来看。
