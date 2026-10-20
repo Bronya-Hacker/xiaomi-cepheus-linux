@@ -377,3 +377,19 @@
 	dai@6 { reg = <MSM_FRONTEND_DAI_MULTIMEDIA7>; };
 	dai@7 { reg = <MSM_FRONTEND_DAI_MULTIMEDIA8>; };
 };
+
+/* apr 音频服务需要挂到 ADSP 的 audio protection domain，
+ * 否则 q6asm 的 buffer memory-map 会被 DSP 拒绝（error 1）。
+ * sdm845/sm8250 的主线 DT 都有这个属性，sm8150 的 dtsi 漏了。
+ */
+&q6afe {
+	qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
+};
+
+&q6asm {
+	qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
+};
+
+&q6adm {
+	qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
+};

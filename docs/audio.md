@@ -112,3 +112,43 @@ FE（MultiMedia1）的 PCM 缓冲区在做 `q6asm` 的 memory-map 时被 DSP 拒
 q6asm 的 iommu SID 0x1b21 与 vendor 一致，audio_pd 也已 up（PDR 有指示）。
 下一步方向：q6asm memory map 的缓冲区对齐/拓扑（topology）设置，或
 `ASM_STREAM_CMD_MEMORY_MAP` 前的 session 配置顺序。
+
+## 追加3：memory-map 的最后一层（2026-10-20 19:10）
+
+### 试过但无效
+
+| 尝试 | 结果 |
+|---|---|
+| `open_write` 与 `memory_map` 换顺序 | 仍 error 1 |
+| 强制 `sid=-1`（地址不带 SID 高位） | 仍 error 1 |
+| `shared_ch_mapping` 用 128–131 | ✅ 有效（AFE 口配置被接受） |
+
+### 现场数据
+
+```
+MEMMAPDBG pool=3 regions=1 sz=524288 phys=0x00000000fff80000
+qcom-q6asm: DSP returned error[1]
+q6asm-dai: Memory_map_regions failed
+```
+
+- `mem_pool_id = 3`（`ADSP_MEMORY_MAP_SHMEM8_4K_POOL`），与 vendor 相同；
+- 缓冲区大小 512 KB（`buffer_bytes_max`）；
+- 地址 `0xfff80000` —— 这是 **apps_smmu 分配的 IOVA**（不是物理地址）。
+
+### 判断
+
+DSP 拒绝这个 IOVA。大概率是 **ADSP 侧看不到 apps_smmu 分配的这段 IOVA**：
+音频缓冲区需要由 ADSP 自己的 SMMU/共享内存池来映射，而主线把 q6asmdai 挂在
+`apps_smmu 0x1b21` 上，地址空间对不上。
+
+vendor 用的是 **`msm-audio-ion`**（专用 Ion heap + ADSP 可访问的固定物理区），
+主线这条路径没有对应实现。
+
+### 下一步（需要更多信息）
+
+1. 查 sm8150 是否有独立的 **ADSP SMMU**（不是 apps_smmu），把 q6asmdai 的
+   iommus 指过去；
+2. 或者参考 vendor 的 `msm-audio-ion`，给音频缓冲分配一段 ADSP 可见的固定内存，
+   用物理地址做 memory-map（而不是 IOVA）；
+3. 这一步基本要靠 ADSP 固件的接口文档，主线没有现成参考（sm8250 音频用的是
+   GPR/Audioreach 新架构，路径不同）。
