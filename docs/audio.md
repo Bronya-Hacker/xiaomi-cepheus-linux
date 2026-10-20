@@ -388,3 +388,36 @@ cs35l41 0-0040: Cirrus Logic CS35L41 (35a40), Revision: B0
 3. 给功放配 MCLK（原厂有 `sec_mi2s_mclk` 引脚）。
 
 这条路比 WSA881x/SoundWire 那条干净得多——全是主线现成的驱动。
+
+### 追加8.1：MI2S 接线已通，只差 I2S 格式配置（2026-10-20 23:20）
+
+把 CS35L41 以 BE dai-link 接进声卡：
+
+```dts
+	mi2s-spk-dai-link {
+		link-name = "SEC MI2S Playback";
+		no-pcm;
+		codec { sound-dai = <&speaker_amp 0>; };
+		cpu { sound-dai = <&q6afedai SECONDARY_MI2S_RX>; };
+		platform { sound-dai = <&q6routing>; };
+	};
+```
+
+结果：
+
+- 声卡正常注册（`sm8150-tavilsndc`），多出了
+  **`SEC_MI2S_RX Audio Mixer MultiMedia1`** 这个路由控件 —— 说明 AFE 侧的
+  链路是通的；
+- 打开它再播放，`snd_soc_dai_prepare() on SEC_MI2S_RX` 报 **-22**。
+
+原因：**`sound/soc/qcom/sm8150.c` 里只有 SLIM 和 TDM 的 `hw_params`，
+没有 I2S 的 `set_fmt` / 格式配置**，所以 `q6afe` 的 I2S 端口拿不到格式参数。
+
+### 下一步（扬声器真正出声）
+
+1. 在机器驱动里给 MI2S 加 `hw_params`/`set_fmt`（I2S、32bit、48k）；
+2. 解决 `sec_mi2s` 引脚复用那个 `-EINVAL`（`msm_pinmux_request` 认为
+   引脚 126 无效，但 pinctrl debugfs 里 pin 126 是注册着的，需要再查）；
+3. 给 CS35L41 配 MCLK 和 `cirrus,firmware-name`（可选，纯播放不一定需要）。
+
+功放已经认识、能读 ID、驱动绑定，剩下的是把数字音频送进去。
