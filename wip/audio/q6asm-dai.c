@@ -32,6 +32,9 @@
 #define CAPTURE_MAX_PERIOD_SIZE     4096
 #define CAPTURE_MIN_PERIOD_SIZE     320
 #define SID_MASK_DEFAULT	0xF
+static int sid_override = -2;	/* -2 = 自动，其它值强制 */
+module_param(sid_override, int, 0644);
+MODULE_PARM_DESC(sid_override, "force pdata->sid (-2 auto, -1 none)");
 
 /* Default values used if user space does not set */
 #define COMPR_PLAYBACK_MIN_FRAGMENT_SIZE (8 * 1024)
@@ -1296,6 +1299,9 @@ static int q6asm_dai_probe(struct platform_device *pdev)
 		pdata->sid = -1;
 	else
 		pdata->sid = args.args[0] & SID_MASK_DEFAULT;
+
+	if (sid_override != -2)
+		pdata->sid = sid_override;
 
 	dev_set_drvdata(dev, pdata);
 

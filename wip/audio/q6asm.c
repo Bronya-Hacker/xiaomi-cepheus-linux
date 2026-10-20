@@ -67,6 +67,12 @@
 #define ASM_TUN_WRITE_IO_MODE		0x0008	/* tunnel read write mode */
 #define ASM_SHIFT_GAPLESS_MODE_FLAG	31
 #define ADSP_MEMORY_MAP_SHMEM8_4K_POOL	3
+static uint mem_pool_id_override = ADSP_MEMORY_MAP_SHMEM8_4K_POOL;
+module_param(mem_pool_id_override, uint, 0644);
+static uint contig_override = 1;
+module_param(contig_override, uint, 0644);
+MODULE_PARM_DESC(contig_override, "1=map buffer as one region, 0=map per period");
+MODULE_PARM_DESC(mem_pool_id_override, "ADSP shared mem pool id (debug)");
 
 struct avs_cmd_shared_mem_map_regions {
 	u16 mem_pool_id;
@@ -463,7 +469,7 @@ static int __q6asm_memory_map_regions(struct audio_client *ac, int dir,
 	pkt->hdr.token = ((ac->session << 8) | dir);
 	pkt->hdr.opcode = ASM_CMD_SHARED_MEM_MAP_REGIONS;
 
-	cmd->mem_pool_id = ADSP_MEMORY_MAP_SHMEM8_4K_POOL;
+	cmd->mem_pool_id = mem_pool_id_override;
 	cmd->num_regions = num_regions;
 	cmd->property_flag = 0x00;
 
@@ -536,7 +542,19 @@ int q6asm_map_memory_regions(unsigned int dir, struct audio_client *ac,
 
 	spin_unlock_irqrestore(&ac->lock, flags);
 
-	rc = __q6asm_memory_map_regions(ac, dir, period_sz, periods, 1);
+	rc = __q6asm_memory_map_regions(ac, dir, period_sz, periods,
+					contig_override);
+
+	/*
+	 * 有些 ADSP 固件（例如 SM8150 的）共享内存池单次映射上限只有 64K，
+	 * 把整个缓冲区当成一块连续内存映射会被拒（DSP 返回错误 1）。
+	 * 这时退化成按 period 分段映射，每段都小于上限。
+	 */
+	if (rc < 0 && contig_override) {
+		dev_info(ac->dev,
+			 "contiguous map failed (%d), retrying per-period\n", rc);
+		rc = __q6asm_memory_map_regions(ac, dir, period_sz, periods, 0);
+	}
 	if (rc < 0) {
 		dev_err(ac->dev, "Memory_map_regions failed\n");
 		q6asm_audio_client_free_buf(ac, &ac->port[dir]);
