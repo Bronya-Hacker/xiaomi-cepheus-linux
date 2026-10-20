@@ -11,6 +11,11 @@
 #include <linux/slab.h>
 #include <sound/pcm.h>
 #include <sound/soc.h>
+
+static int rx_ch_base = 128;
+module_param(rx_ch_base, int, 0644);
+static int tx_ch_base = 128;
+module_param(tx_ch_base, int, 0644);
 #include <sound/pcm_params.h>
 #include "q6dsp-lpass-ports.h"
 #include "q6dsp-common.h"
@@ -45,10 +50,17 @@ static int q6slim_hw_params(struct snd_pcm_substream *substream,
 	slim->sample_rate = params_rate(params);
 	slim->num_channels = params_channels(params);
 	slim->slimbus_dev_id = 1;	/* AFE_SLIMBUS_DEVICE_1 */
-	slim->ch_mapping[0] = 128;	/* 共享通道 ID 128..255 */
-	slim->ch_mapping[1] = 129;
-	slim->ch_mapping[2] = 130;
-	slim->ch_mapping[3] = 131;
+	if (dai->id >= SLIMBUS_0_RX && dai->id <= SLIMBUS_6_RX) {
+		slim->ch_mapping[0] = rx_ch_base;
+		slim->ch_mapping[1] = rx_ch_base + 1;
+		slim->ch_mapping[2] = rx_ch_base + 2;
+		slim->ch_mapping[3] = rx_ch_base + 3;
+	} else {
+		slim->ch_mapping[0] = tx_ch_base;
+		slim->ch_mapping[1] = tx_ch_base + 1;
+		slim->ch_mapping[2] = tx_ch_base + 2;
+		slim->ch_mapping[3] = tx_ch_base + 3;
+	}
 
 	switch (params_format(params)) {
 	case SNDRV_PCM_FORMAT_S16_LE:

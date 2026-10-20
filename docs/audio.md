@@ -248,3 +248,23 @@ PCM state: RUNNING   arecord 6 秒 → 576000 样本，峰值 0
 查 vendor  tavil 的 SLIMbus 通道映射：AFE 的 shared channel 与 codec 的
 port 通道怎么对应（可能是 `128+port` 或需要 `wcd934x_slim_set_channel_map()`
 把 codec 端口映射到 128 起的共享通道）。定下来之后播放和录音应该一起通。
+
+### 通道基址实验（已做完）
+
+给 `q6afe-dai.c` 加了两个调试参数 `rx_ch_base` / `tx_ch_base`，
+把 AFE 的共享通道映射做成运行时可调，一次重启里试了
+`tx_ch_base = 128 / 0 / 16 / 32 / 64`——**全部仍然录到纯 0**。
+
+同时确认：
+
+- 控制器实现了 `enable_stream`（会发 `SLIM_MSG_MC_DEF_ACT_CHAN` 激活通道），
+  架构上不缺数据通路；
+- 该基址下 DSP 都接受配置、不报 AFE 错误；
+- 录音时 codec 侧 `AIF1 Capture` 是 `On`、PCM `RUNNING`。
+
+### 结论
+
+控制面（SLIMbus 寄存器读写、DAPM、AFE 端口启动）全通，
+**数据面（SLIMbus 音频通道真正搬数据）不工作**，而且与通道基址无关。
+下一步需要对照 vendor 的 SLIMbus 通道分配表，或用逻辑分析仪抓 SLIMbus 波形，
+确认 codec 是否真的把数据推上了总线。
