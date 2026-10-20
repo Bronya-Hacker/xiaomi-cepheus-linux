@@ -291,3 +291,39 @@ camss 需要 CAMSS **175** 的资源表和 DT 节点 + 传感器驱动，见本�
 要不要继续，我等你一句话。继续的话顺序是：
 重建 boot 镜像 → 节点改成 okay → `fastboot flash boot` → 开机 → `insmod qcom-camss.ko`
 → 看 `media-ctl -p` 里有没有 CSIPHY→CSID→VFE 的实体图。
+
+## 十一、M2 达成（2026-10-20 13:00）：camss 在真机上跑起来了
+
+`media-ctl -d /dev/media0 -p` 的完整拓扑：
+
+```
+msm_csiphy0..3  →  msm_csid0/1  →  msm_vfe0/1 (rdi0..2 + pix)
+/dev/video0..7  +  /dev/media0  全部注册
+dmesg: vfe0/vfe1 各 "6 clocks ok"、IRQ 183/184，无 oops
+```
+
+（`/dev/v4l-subdev*` 也在，csiphy/csid 各自的 sink/source pad 都对上了。）
+
+### 11.1 关键改动
+
+- `camss.c`：`sm8150_resources` + `qcom,sm8150-camss` 匹配；
+  ops 复用 SDM845（`csiphy_ops_3ph_1_0` / `csid_ops_gen2` / `vfe_ops_170`），
+  地址与中断取自设备上的下游 DT。
+- `camss-vfe.c`：加了三条调试打印（stage0 / irq / clocks），定位用，可留可删。
+
+### 11.2 这一轮踩的四个坑（按顺序）
+
+1. `struct clk_alpha_pll` / `clk_alpha_pll_postdiv` 缺 `.regs` → 段错误（M1 同款，camss 也受影响）；
+2. `struct vfe_subdev_resources` 里字段是 **`hw_ops`**，写成 `ops` 编不过、删掉则 NULL 解引用；
+3. VFE 的 `pd_name` + `has_pd=true` 会再 attach 一个电源域，而 DT 上 camss 已挂 MMCX →
+   `-EEXIST`（`Fail to init vfe0 sub-device: -17`）。SM8150 上先 `has_pd=false`、不写 pd_name；
+4. 替换文本时误改了共享的 SDM845 条目（两边的 `.line_num = 4, .pd_name = "ife0",`
+   完全一样），已恢复。
+
+### 11.3 现状与下一步
+
+- 时钟（M1）+ 采集管线（M2）都通了，**但还没有任何传感器**：`video*` 节点存在、拓扑在，
+  没有 i2c 上的 sensor 就不会有帧。
+- M3 才是真正的"能出图"：给 IMX586（主摄）写/移植 `v4l2_subdev` 驱动，
+  需要 i2c 地址、上电时序、PLL 与模式寄存器表 —— 下游 `techpack/camera` 里有现成的。
+- 电源管理（VFE 的 per-VFE 电源域）暂时用 `has_pd=false` 绕开，等出图后再补。
