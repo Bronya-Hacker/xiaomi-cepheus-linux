@@ -1341,10 +1341,10 @@ static int __imx586_power_on(struct imx586 *imx586)
 		gpiod_set_value_cansleep(imx586->reset_gpio, 1);
 
 	/* need wait 8ms to set register */
-	usleep_range(60000, 70000);
+	usleep_range(8000, 10000);
 
 	/* 8192 cycles prior to first SCCB transaction */
-	delay_us = imx586_cal_delay(8192) + 100000;
+	delay_us = imx586_cal_delay(8192);
 	usleep_range(delay_us, delay_us * 2);
 
 	return 0;
@@ -1730,15 +1730,11 @@ static int imx586_probe(struct i2c_client *client)
 	imx586->client = client;
 
 	imx586->pinctrl = devm_pinctrl_get(dev);
-	dev_info(dev, "PINDBG pinctrl=%ld\n", IS_ERR(imx586->pinctrl) ? PTR_ERR(imx586->pinctrl) : 0L);
 	if (!IS_ERR(imx586->pinctrl)) {
 		imx586->pins_default =
 			pinctrl_lookup_state(imx586->pinctrl, "default");
-		dev_info(dev, "PINDBG lookup=%ld\n",
-			 IS_ERR(imx586->pins_default) ? PTR_ERR(imx586->pins_default) : 0L);
 		if (!IS_ERR(imx586->pins_default))
-			dev_info(dev, "PINDBG select=%d\n",
-				 pinctrl_select_state(imx586->pinctrl, imx586->pins_default));
+			pinctrl_select_state(imx586->pinctrl, imx586->pins_default);
 	}
 	imx586->cfg_num = ARRAY_SIZE(supported_modes);
 	for (i = 0; i < imx586->cfg_num; i++) {
@@ -1758,12 +1754,10 @@ static int imx586_probe(struct i2c_client *client)
 	}
 
 	imx586->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
-	dev_info(dev, "PINDBG reset=%ld pwdn-next\n", IS_ERR(imx586->reset_gpio) ? PTR_ERR(imx586->reset_gpio) : 0L);
 	if (IS_ERR(imx586->reset_gpio))
 		dev_warn(dev, "Failed to get reset-gpios\n");
 
 	imx586->pwdn_gpio = devm_gpiod_get(dev, "pwdn", GPIOD_OUT_LOW);
-	dev_info(dev, "PINDBG pwdn=%ld\n", IS_ERR(imx586->pwdn_gpio) ? PTR_ERR(imx586->pwdn_gpio) : 0L);
 	if (IS_ERR(imx586->pwdn_gpio))
 		dev_warn(dev, "Failed to get pwdn-gpios\n");
 
@@ -1788,7 +1782,7 @@ static int imx586_probe(struct i2c_client *client)
 
 	ret = imx586_check_sensor_id(imx586, client);
 	if (ret)
-		dev_err(dev, "id check failed -- continuing anyway (debug)\n");
+		goto err_power_off;
 
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
 	sd->internal_ops = &imx586_internal_ops;
@@ -1811,7 +1805,6 @@ static int imx586_probe(struct i2c_client *client)
 	}
 
 	/* debug: 不启用 runtime PM，保持供电以便探测 */
-	dev_info(dev, "PINDBG runtime pm skipped (debug)\n");
 
 	return 0;
 
