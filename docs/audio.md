@@ -625,3 +625,81 @@ dmesg:
    但 vendor 的 capture 映射可能不同（之前强行改成 128+ 导致
    `q6routing_stream_open ret:-22` 而回退过）；
 3. 确认 codec 侧 ADC/TX 真的在出数据（读 WCD9340 的 TX 端口状态寄存器）。
+
+---
+
+## 追加11：★ 扬声器真正的音频通道是 QUATERNARY MI2S（2026-10-21 05:45）
+
+### 怎么找到的
+
+翻原厂 vendor 分区的 mixer 配置，找到 **cepheus 专用的 overlay**：
+
+```
+/mnt/vendor/etc/mixer_paths_overlay_static.xml
+
+  <path name="deep-buffer-playback speaker">
+      <ctl name="QUAT_MI2S_RX Audio Mixer MultiMedia1" value="1" />
+  </path>
+  <path name="low-latency-playback speaker">
+      <ctl name="QUAT_MI2S_RX Audio Mixer MultiMedia5" value="1" />
+  </path>
+  ...
+  <ctl name="AMP Enable Switch" value="0" />
+  <ctl name="DSP1 Firmware" value="Protection" />
+  <ctl name="PCM Source" value="DSP" />
+  <ctl name="AMP PCM Gain" value="17" />
+  <ctl name="ASP TX1 Source" value="Zero" />
+```
+
+两件事一次说清：
+
+1. **扬声器走 QUATERNARY MI2S**（`QUAT_MI2S_RX`），**不是** secondary MI2S
+   —— 我前面折腾半天的 126-129 引脚方向从根上就错了；
+2. `AMP Enable Switch` / `DSP1 Firmware` / `PCM Source=DSP` 这些是 **CS35L41 的
+   DSP 控件**，确认功放就是 CS35L41（不是 WSA881x，WSA 那些控件是参考设计遗留）。
+
+### 引脚
+
+quat_mi2s 用的是 **GPIO136（MCLK）/ 137 / 138 / 139 / 140**，
+而保留区是 0-3 和 126-129 —— **136-140 完全是自由的**，主线 `pinctrl-sm8150`
+也支持（`qua_mi2s_groups` 含 gpio136-140）。
+
+### 已做的改动（已刷入验证）
+
+- dtsi：`quat_mi2s_active`（gpio136-140，function `qua_mi2s`）挂到功放节点；
+- dtsi：`&q6afedai` 的 dai 节点改成 `reg = <QUATERNARY_MI2S_RX>` + `qcom,sd-lines = <0>`；
+- dtsi：后端链路 cpu 改成 `<&q6afedai QUATERNARY_MI2S_RX>`；
+- 机器驱动：`sm8150_i2s_snd_hw_params()` 按端口选 IBIT 时钟
+  （新增 `AFE_CLK_{PRI,TER,QUAD}_MI2S_IBIT`），并让 `QUATERNARY_MI2S_RX` 走这条路径。
+
+### 结果：引脚复用成功了！
+
+```
+pin 136 (GPIO_136): 0-0040 (GPIO UNCLAIMED) function qua_mi2s group gpio136
+pin 137..140:       同上
+```
+
+声卡注册、**`QUAT_MI2S_RX Audio Mixer MultiMedia1` 控件出现**、功放绑定、
+**启动完全正常**（没有动保留区，所以不会变砖）。
+
+### 但功放仍然上电失败
+
+```
+cs35l41 0-0040: Enable(1) failed: -110
+cs35l41 0-0040: ASoC: PRE_PMU: Main AMP event failed: -110
+```
+
+所以卡点不在音频通道，而在**功放自身的上电**。
+
+### 接下来三个方向
+
+1. **VP 供电**：CS35L41 的功率级要 VP（约 3.8V）。原厂靠 ADSP 控制
+   （`PCM Source=DSP`），主线上我们只能自己管理。现在指到 `vreg_bob`(3.35V)，
+   很可能**并不是板上真正给功放的那一路**（多半直连电池或经负载开关）。
+2. **MCLK**：GPIO136 是 quat_mi2s 的 MCLK，但 AFE 侧我们只设了 `MCLK_1`，
+   到底哪一路 AFE 时钟接到 136 不确定，需要试 `MCLK_2/3/4`。
+3. **DSP 固件**：主线这个版本的 cs35l41 驱动**没有**加载 wmfw 的能力
+   （没有 `cirrus,firmware-name` 属性读取）。而原厂是
+   `DSP1 Firmware=Protection` —— 说明厂商靠 DSP 固件做扬声器保护。
+   若要完全对齐厂商行为，需要升级到支持 cs_dsp 固件的新版驱动，
+   并把 `/vendor/firmware/cs35l41-dsp1-spk-prot.wmfw` 放进 `/lib/firmware`。
