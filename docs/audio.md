@@ -421,3 +421,45 @@ cs35l41 0-0040: Cirrus Logic CS35L41 (35a40), Revision: B0
 3. 给 CS35L41 配 MCLK 和 `cirrus,firmware-name`（可选，纯播放不一定需要）。
 
 功放已经认识、能读 ID、驱动绑定，剩下的是把数字音频送进去。
+
+### 追加8.2：MI2S 准备过了，卡在功放最后上电（2026-10-21 01:20）
+
+#### 已解决
+
+1. **`qcom,sd-lines`**：`&q6afedai` 里必须给 MI2S 的 DAI 声明 SD 线，
+   否则 `sd_line_mask = 0`，`SEC_MI2S_RX` 的 prepare 永远 -22。
+   加了 `dai@18 { reg = <SECONDARY_MI2S_RX>; qcom,sd-lines = <0>; }` 后
+   prepare 通过；
+2. **I2S 格式**：`sm8150.c` 只有 SLIM / TDM 的 `hw_params`，补了一个
+   `sm8150_i2s_snd_hw_params()`：给 cpu dai 设 `SND_SOC_DAIFMT_I2S|
+   NB_NF|CBC_CFC`，并给 codec dai 设 `set_sysclk(CS35L41_CLKID_SCLK, ...)`。
+
+#### 仍然卡住
+
+```
+cs35l41 0-0040: Enable(1) failed: -110
+cs35l41 0-0040: ASoC: PRE_PMU: Main AMP event failed: -110
+```
+
+`global_enable()` 在等 PUP/PDN 中断超时。试过并**无效**的：
+
+- 接 `VA-supply = <&vreg_s4a_1p8>` / `VP-supply = <&vreg_bob>`；
+- 补原厂的 GPIO2 配置（`cirrus,gpio2-src-select = <4>` + output-enable）；
+- 设 sysclk 用 SCLK（位时钟）当参考。
+
+#### 关键线索
+
+反绑定驱动后，I2C 地址 0x40 **不再应答**（`No such device or address`）——
+功放只在驱动释放复位后短暂出现。OTP boot 能完成、ID `35a40` 读得到，
+说明芯片本体是好的；但一使能输出级（GLOBAL_EN）就起不来。
+
+推断：**功放的 VP（功率电源）没真正供上**。它多半直接取自电池 / 或由某个
+未开的负载开关控制，不是 PMIC 可控轨，`vreg_bob` 替代不了。
+
+#### 下一步
+
+要确认功放 VP 的真实来源，需要从原厂的电源树（原理图 / vendor 的 regulator
+映射）找它挂在哪个源上，而不是继续猜 PMIC 轨。
+
+★ 当前设备状态：**健康**（声卡注册、SLIM 路由播放正常、功放驱动仍绑定，
+只是扬声器不响）。MI2S 相关改动都保留在 DT 和机器驱动里。

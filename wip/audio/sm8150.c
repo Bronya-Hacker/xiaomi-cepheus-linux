@@ -9,6 +9,7 @@
 #include <linux/of_device.h>
 #include <linux/soundwire/sdw.h>
 #include <sound/soc.h>
+#include <sound/cs35l41.h>
 #include <sound/soc-dapm.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -57,6 +58,34 @@ static int sm8150_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 	channels->min = channels->max = 2;
 	snd_mask_none(fmt);
 	snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
+
+	return 0;
+}
+
+static int sm8150_i2s_snd_hw_params(struct snd_pcm_substream *substream,
+				     struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+	unsigned int fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
+			   SND_SOC_DAIFMT_CBC_CFC;
+	struct snd_soc_dai *codec_dai;
+	int ret, i;
+
+	ret = snd_soc_dai_set_fmt(cpu_dai, fmt);
+	if (ret < 0 && ret != -ENOTSUPP)
+		return ret;
+
+	/* 功放没有独立 MCLK 引脚时用 MI2S 的位时钟当参考时钟（SCLK） */
+	for_each_rtd_codec_dais(rtd, i, codec_dai) {
+		ret = snd_soc_dai_set_sysclk(codec_dai, CS35L41_CLKID_SCLK,
+					     params_rate(params) * 64,
+					     SND_SOC_CLOCK_IN);
+		if (ret < 0 && ret != -ENOTSUPP) {
+			dev_err(rtd->dev, "failed to set codec sysclk: %d\n", ret);
+			return ret;
+		}
+	}
 
 	return 0;
 }
@@ -203,6 +232,9 @@ static int sm8150_snd_hw_params(struct snd_pcm_substream *substream,
 	case QUATERNARY_TDM_RX_0:
 	case QUATERNARY_TDM_TX_0:
 		ret = sm8150_tdm_snd_hw_params(substream, params);
+		break;
+	case SECONDARY_MI2S_RX:
+		ret = sm8150_i2s_snd_hw_params(substream, params);
 		break;
 	case SLIMBUS_0_RX...SLIMBUS_6_TX:
 		ret = sm8150_slim_snd_hw_params(substream, params);

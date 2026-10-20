@@ -315,6 +315,17 @@
 
 /* ================= 声卡 ================= */
 
+
+/* secondary MI2S 的 SD 线：原厂两路 SD0(GPIO128)/SD1(GPIO129)。
+ * 没有这个属性 q6afe 的 sd_line_mask 就是 0，prepare 会 -22。
+ */
+&q6afedai {
+	dai@18 {
+		reg = <SECONDARY_MI2S_RX>;
+		qcom,sd-lines = <0>;
+	};
+};
+
 &sound {
 	compatible = "qcom,sm8150-sndcard";
 	model = "sm8150-tavil-snd-card";
@@ -424,6 +435,8 @@
 		 * 原来按原厂语义写成 ACTIVE_LOW，逻辑 1 反而变成物理低，
 		 * 等于一直按着复位，芯片永远等不到 OTP_BOOT_DONE。
 		 */
+		VA-supply = <&vreg_s4a_1p8>;
+		VP-supply = <&vreg_bob>;
 		reset-gpios = <&tlmm 89 GPIO_ACTIVE_HIGH>;
 		interrupt-parent = <&tlmm>;
 		interrupts = <10 IRQ_TYPE_LEVEL_LOW>;
@@ -431,6 +444,9 @@
 		cirrus,boost-peak-milliamp = <4000>;
 		cirrus,boost-ind-nanohenry = <1000>;
 		cirrus,boost-cap-microfarad = <15>;
+		/* 原厂的 cirrus,gpio-config2: gpio-src-select=4 + output-enable */
+		cirrus,gpio2-src-select = <4>;
+		cirrus,gpio2-output-enable;
 	};
 };
 
