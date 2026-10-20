@@ -320,8 +320,8 @@
  * 没有这个属性 q6afe 的 sd_line_mask 就是 0，prepare 会 -22。
  */
 &q6afedai {
-	dai@18 {
-		reg = <SECONDARY_MI2S_RX>;
+	dai@22 {
+		reg = <QUATERNARY_MI2S_RX>;
 		qcom,sd-lines = <0>;
 	};
 };
@@ -384,7 +384,7 @@
 		no-pcm;
 
 		codec { sound-dai = <&speaker_amp 0>; };
-		cpu { sound-dai = <&q6afedai SECONDARY_MI2S_RX>; };
+		cpu { sound-dai = <&q6afedai QUATERNARY_MI2S_RX>; };
 		platform { sound-dai = <&q6routing>; };
 	};
 
@@ -437,6 +437,10 @@
 		 */
 		VA-supply = <&vreg_s4a_1p8>;
 		VP-supply = <&vreg_bob>;
+		/* 功放的 I2S 引脚复用（qua_mi2s：136 MCLK / 137-140 数据） */
+		pinctrl-names = "default";
+		pinctrl-0 = <&quat_mi2s_active>;
+
 		reset-gpios = <&tlmm 89 GPIO_ACTIVE_HIGH>;
 		interrupt-parent = <&tlmm>;
 		interrupts = <10 IRQ_TYPE_LEVEL_LOW>;
@@ -452,9 +456,9 @@
 
 /* 扬声器功放的音频输入：secondary MI2S（原厂 gpio126-129） */
 &tlmm {
-	sec_mi2s_active: sec-mi2s-active {
-		pins = "gpio126", "gpio127", "gpio128", "gpio129", "gpio130";
-		function = "sec_mi2s";
+	quat_mi2s_active: quat-mi2s-active {
+		pins = "gpio136", "gpio137", "gpio138", "gpio139", "gpio140";
+		function = "qua_mi2s";
 		drive-strength = <8>;
 		bias-disable;
 	};
