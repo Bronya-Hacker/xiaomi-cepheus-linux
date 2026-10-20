@@ -215,3 +215,36 @@ amixer 设置打包好了，省得每次手敲。已放进 `payload/usr/local/bi
 `arecord` 能跑通（1 秒 = 192000 字节），但**录到的全是 0**：
 采集链路（AMIC → DEC0 → SLIM TX0 → AIF1_CAP）的 DAPM 通路还没接对，
 和扬声器一样属于"最后调音"范畴。
+
+## 追加5：录音全 0 的真凶方向 —— SLIMbus 通道编号
+
+### 实测（录音时 DAPM 状态）
+
+```
+MIC BIAS2    On      AMIC2   On      ADC2   On
+AMIC MUX0    On      CDC_IF TX0 MUX On   SLIM TX0  On
+AIF1_CAP Mixer On    AIF1 CAP On    AIF1 Capture On
+PCM state: RUNNING   arecord 6 秒 → 576000 样本，峰值 0
+```
+
+也就是说：**软件链路全通、流在跑，但数据是纯 0**。模拟静音不会这么干净，
+说明 codec 根本没往 SLIMbus 上发数据。
+
+### 原因方向
+
+两套通道编号对不上：
+
+| 侧 | 编号 |
+|---|---|
+| codec（wcd934x） | SLIM TX 通道 **0–15**，SLIM RX 通道 **16–31** |
+| AFE（q6afe） | `shared_ch_mapping` 要求 **128–255** 的共享通道 ID |
+
+我在 `q6slim_hw_params` 里给两个方向都填了 `128,129,130,131`——RX 方向 DSP 接受了
+（所以播放能跑），但 codec 实际用的是 0–15/16–31，两边接不到同一根通道上，
+于是没有数据搬运。播放"成功"目前只验证到 DSP 接受缓冲区，**并不代表 codec 真收到了音频**。
+
+### 下一步
+
+查 vendor  tavil 的 SLIMbus 通道映射：AFE 的 shared channel 与 codec 的
+port 通道怎么对应（可能是 `128+port` 或需要 `wcd934x_slim_set_channel_map()`
+把 codec 端口映射到 128 起的共享通道）。定下来之后播放和录音应该一起通。
