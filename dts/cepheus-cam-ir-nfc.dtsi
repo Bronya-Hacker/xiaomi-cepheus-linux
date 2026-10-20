@@ -306,24 +306,6 @@
 				clock-names = "iface";
 				#address-cells = <2>;
 				#size-cells = <0>;
-
-				left_spkr: speaker@0,1 {
-					compatible = "sdw10217201000";
-					reg = <0 1>;
-					powerdown-gpios = <&wcdgpio 1 GPIO_ACTIVE_HIGH>;
-					#thermal-sensor-cells = <0>;
-					sound-name-prefix = "SpkrLeft";
-					#sound-dai-cells = <0>;
-				};
-
-				right_spkr: speaker@0,2 {
-					compatible = "sdw10217201000";
-					reg = <0 2>;
-					powerdown-gpios = <&wcdgpio 1 GPIO_ACTIVE_HIGH>;
-					#thermal-sensor-cells = <0>;
-					sound-name-prefix = "SpkrRight";
-					#sound-dai-cells = <0>;
-				};
 			};
 		};
 	};
@@ -344,9 +326,7 @@
 		"DMIC0", "MCLK",
 		"DMIC0", "MIC BIAS1",
 		"DMIC2", "MCLK",
-		"DMIC2", "MIC BIAS3",
-		"SpkrLeft IN", "SPK1 OUT",
-		"SpkrRight IN", "SPK2 OUT";
+		"DMIC2", "MIC BIAS3";
 
 	mm1-dai-link {
 		link-name = "MultiMedia1";
@@ -372,10 +352,7 @@
 	slim-dai-link {
 		link-name = "SLIM Playback 1";
 		no-pcm;
-		codec {
-			sound-dai = <&left_spkr>, <&right_spkr>,
-				    <&swm 0>, <&wcd9340 AIF1_PB>;
-		};
+		codec { sound-dai = <&wcd9340 AIF1_PB>; };
 		cpu { sound-dai = <&q6afedai SLIMBUS_0_RX>; };
 		platform { sound-dai = <&q6routing>; };
 	};
