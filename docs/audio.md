@@ -463,3 +463,17 @@ cs35l41 0-0040: ASoC: PRE_PMU: Main AMP event failed: -110
 
 ★ 当前设备状态：**健康**（声卡注册、SLIM 路由播放正常、功放驱动仍绑定，
 只是扬声器不响）。MI2S 相关改动都保留在 DT 和机器驱动里。
+
+### ★ 重要工程坑：模块改动必须走 payload，手动拷进 /lib/modules 无效（2026-10-21 01:35）
+
+今天在设备上改 cs35l41 / sm8150 机器驱动时发现：
+
+- 手动 `cp *.ko /lib/modules/...` + `depmod` + `modprobe` 看似生效；
+- **但一重启就回到原样** —— 因为开机时 initramfs 会解 `mods.tar.gz`
+  （payload）到 `/lib/modules`，把手动放进去的文件**覆盖掉**。
+
+也就是说：**改内核模块必须重跑 02（重打 mods.tar.gz）→ 06（kernelfat）
+→ 刷 kernelfat 才会真正生效**。今天早些时候把 payload 版本号改成内容指纹
+正是为了这个（否则连刷 kernelfat 都不会重新解压）。
+
+推论：之前几次"改了模块、重启后行为没变"的困惑，根源就在这里。
