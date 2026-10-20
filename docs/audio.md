@@ -197,3 +197,21 @@ wsa881x-codec: Initialization not complete, timed out
 2. 或检查 `wcd934x_swrm_clock()` 写 `WCD934X_CDC_CLK_RST_CTRL_SWR_CONTROL`
    时 codec 是否真的接受（该寄存器经 SLIMbus 写入，可加调试打印确认）；
 3. fifo status `0x3e000127` 可对照 qcom-soundwire 的错误位定义进一步定位。
+## 能用起来的部分：`mi9-audio` 工具
+
+```sh
+mi9-audio setup          # 只配置路由
+mi9-audio tone 2         # 播 2 秒 440Hz 测试音
+mi9-audio play foo.raw   # 播放 raw PCM（S16_LE 立体声）
+mi9-audio status         # 看声卡和路由状态
+```
+
+它把 `SLIMBUS_0_RX Audio Mixer MultiMedia1` 和耳机（HPH）通路的 12 个
+amixer 设置打包好了，省得每次手敲。已放进 `payload/usr/local/bin/`，
+下次刷 payload 就会出现在 `/usr/local/bin/mi9-audio`。
+
+### 录音状态
+
+`arecord` 能跑通（1 秒 = 192000 字节），但**录到的全是 0**：
+采集链路（AMIC → DEC0 → SLIM TX0 → AIF1_CAP）的 DAPM 通路还没接对，
+和扬声器一样属于"最后调音"范畴。

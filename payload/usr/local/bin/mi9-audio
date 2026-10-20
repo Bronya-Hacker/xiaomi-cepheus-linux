@@ -1,0 +1,53 @@
+#!/bin/bash
+# Mi 9 (cepheus) 音频路由 + 播放/录音工具
+# 用法:
+#   mi9-audio setup            只配置路由
+#   mi9-audio play FILE [rate] 播放 raw PCM (S16_LE, 2ch)
+#   mi9-audio tone [秒]        播放 440Hz 测试音
+#   mi9-audio status           查看声卡与路由状态
+set -u
+CARD=0
+
+setup() {
+    amixer -c $CARD cset name='SLIMBUS_0_RX Audio Mixer MultiMedia1' 1 >/dev/null 2>&1
+    # 走耳机/HPH 通路（扬声器功放还没通）
+    amixer -c $CARD cset name='SLIM RX0 MUX' 'AIF1_PB' >/dev/null 2>&1
+    amixer -c $CARD cset name='SLIM RX1 MUX' 'AIF1_PB' >/dev/null 2>&1
+    amixer -c $CARD cset name='RX INT0_1 MIX1 INP0' 'RX0' >/dev/null 2>&1
+    amixer -c $CARD cset name='RX INT1_1 MIX1 INP0' 'RX1' >/dev/null 2>&1
+    amixer -c $CARD cset name='RX INT0_2 MUX' 'RX0' >/dev/null 2>&1
+    amixer -c $CARD cset name='RX INT1_2 MUX' 'RX1' >/dev/null 2>&1
+    amixer -c $CARD cset name='RX HPH Mode' 'Class-H Hi-Fi' >/dev/null 2>&1
+    amixer -c $CARD cset name='HPHL' 80 >/dev/null 2>&1
+    amixer -c $CARD cset name='HPHR' 80 >/dev/null 2>&1
+    amixer -c $CARD cset name='RX1 Digital' 84 >/dev/null 2>&1
+    amixer -c $CARD cset name='RX2 Digital' 84 >/dev/null 2>&1
+}
+
+case "${1:-}" in
+  setup) setup; echo "路由已配置" ;;
+  play)
+    [ -n "${2:-}" ] || { echo "用法: mi9-audio play FILE [rate]"; exit 1; }
+    RATE="${3:-48000}"
+    setup
+    exec aplay -D hw:$CARD,0 -t raw -f S16_LE -r "$RATE" -c 2 "$2"
+    ;;
+  tone)
+    SECS="${2:-2}"
+    python3 -c "
+import struct, math, sys
+n = int(48000*$SECS)
+out = sys.stdout.buffer
+for i in range(n):
+    s = int(12000*math.sin(2*math.pi*440*i/48000))
+    out.write(struct.pack('<hh', s, s))
+" > /tmp/.mi9-tone.raw
+    setup
+    exec aplay -D hw:$CARD,0 -t raw -f S16_LE -r 48000 -c 2 /tmp/.mi9-tone.raw
+    ;;
+  status)
+    echo "声卡: $(head -n1 /proc/asound/cards | tr -s ' ')"
+    amixer -c $CARD cget name='SLIMBUS_0_RX Audio Mixer MultiMedia1' 2>/dev/null | tail -n 2
+    ;;
+  *) echo "用法: mi9-audio {setup|play FILE [rate]|tone [秒]|status}"; exit 1 ;;
+esac
