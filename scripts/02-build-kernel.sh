@@ -337,6 +337,15 @@ fi
 # depmod 生成 modules.dep，供设备上 switch_root 前/后自动加载
 depmod -b "$INST" "$KVER" 2>/dev/null || true
 
+# ★ 模块内容指纹：手动版本号改不动是今天踩过的坑（改了 .ko 但 payload 版本
+#   没变 → 设备上不会重新解压）。这里按「模块文件内容」算一个短哈希拼进版本号，
+#   内容一样就一样、改了必然变。
+MODSHA=$( { cd "$INST/lib/modules/$KVER" 2>/dev/null && \
+            find . -name '*.ko' -type f -print0 | sort -z | \
+            xargs -0 sha256sum 2>/dev/null | awk '{print $1}'; } | \
+          sha256sum | cut -c1-8 )
+MODSHA="${MODSHA:-nonmod}"
+
 ( cd "$INST/lib/modules" && tar czf "$OUT/mods.tar.gz" "$KVER" )
 rm -rf "$INST"
 
@@ -396,6 +405,16 @@ fi
 # 的 /etc/wifi-cfg.ver 比较，一样就跳过解压（避免每次开机都把 rootfs 冲一遍）。
 PAYLOADVER="$(head -1 "$HERE/payload/etc/wifi-cfg.ver" 2>/dev/null)"
 PAYLOADVER="${PAYLOADVER:-unknown}"
+
+# payload 源文件指纹（payload/ 下所有文件，排除版本号文件本身）
+PAYSRCSHA=$( { cd "$HERE/payload" 2>/dev/null && \
+               find . -type f ! -name 'wifi-cfg.ver' -print0 | sort -z | \
+               xargs -0 sha256sum 2>/dev/null | awk '{print $1}'; } | \
+             sha256sum | cut -c1-8 )
+PAYSRCSHA="${PAYSRCSHA:-nosrc}"
+
+# 最终版本号 = 手动标记 + 模块指纹 + 载荷指纹
+PAYLOADVER="${PAYLOADVER}+m${MODSHA}+p${PAYSRCSHA}"
 echo "payload 版本号 : $PAYLOADVER"
 
 # BUILD-ID：把本次构建的"输入"揉成一个短哈希 —— 内核 Image 是由 initramfs
