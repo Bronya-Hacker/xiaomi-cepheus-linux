@@ -596,3 +596,32 @@ gpio-reserved-ranges = <0 4>, <126 4>;
 
 **结论：扬声器走 secondary MI2S 这条路，在"保留不能去掉"的前提下走不通。**
 要继续攻扬声器，得换个思路（例如查这 4 个脚到底被谁用、或者确认功放是否有其它输入路径）。
+
+---
+
+## 追加10：录音全 0 的新线索（2026-10-21 05:28）
+
+模块问题全修好之后，声卡和播放都正常了，但**录音仍然是全 0**：
+
+```
+$ arecord ... -d 2 /tmp/rec.raw
+样本 192000  峰值 0  非零 0
+
+dmesg:
+  q6afe-dai ... SLIMDBG id=3 rate=48000 bits=16 ch=2 fmt=0 map=128,129,130,131
+  q6asm-dai ... command[0x10bdb] not expecting rsp
+```
+
+- `SLIMDBG id=3` 说明 **SLIMBUS_0_TX 端口参数是配上了**的（3 = SLIMBUS_0_TX）；
+- 但紧接着 `command[0x10bdb] not expecting rsp`：DSP 给了一条驱动**没在等**的响应，
+  说明命令/响应配对出了问题（`q6asm.c` 里我们改过 `mem_pool_id=3` 和
+  `contig_override`，需要盯一下这条是不是它引起的）。
+
+### 下一步排查方向
+
+1. 把 `q6asm.c` 里我们改动的地方（mem_pool_id / contig_override）逐条回退对照，
+   确认 `0x10bdb` 是不是自找的；
+2. TX 的通道映射：现在 capture 也用 `map=128,129,130,131`（和 playback 一样），
+   但 vendor 的 capture 映射可能不同（之前强行改成 128+ 导致
+   `q6routing_stream_open ret:-22` 而回退过）；
+3. 确认 codec 侧 ADC/TX 真的在出数据（读 WCD9340 的 TX 端口状态寄存器）。
