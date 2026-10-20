@@ -12,6 +12,7 @@
 #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
 #include "sm8150.dtsi"
 #include "pm8150.dtsi"
+#include <dt-bindings/usb/pd.h>
 #include "pm8150b.dtsi"
 #include "pm8150l.dtsi"
 
@@ -1130,16 +1131,45 @@
 	status = "okay";
 };
 
-/* Type-C 角色检测（PM8150B 自带），并把 HS 端点接到 dwc3 上 */
+/* Type-C 角色检测（PM8150B 自带），并把 HS 端点接到 dwc3 上。
+ *
+ * 要点（2026-10-21 首次尝试 probe 失败 -22 后补的）：
+ *   - vdd-pdphy-supply 是必需的（PD PHY 的 3.1V），缺了驱动直接 -EINVAL；
+ *   - 必须有 usb-c-connector 子节点，role switch 的 port 挂在它下面
+ *     （raphael / elish 都是这个结构）；
+ *   - power-role 用 dual + try-power-role=sink：平时当设备（USB 网卡），
+ *     插 OTG 设备时才当主机给外面供电。
+ */
 &pm8150b_typec {
+	vdd-vbus-supply = <&pm8150b_vbus>;
+	vdd-pdphy-supply = <&vreg_l2a_3p1>;
 	status = "okay";
 
-	ports {
-		#address-cells = <1>;
-		#size-cells = <0>;
+	connector {
+		compatible = "usb-c-connector";
 
-		pm8150b_hs_in: endpoint {
-			remote-endpoint = <&usb_1_dwc3_hs>;
+		/* power-role=dual 时 tcpm 要求 sink-pdos 与 source-pdos 都给出，
+		 * 否则 tcpm_register_port() 直接 -EINVAL（2026-10-21 就是这么卡的）。
+		 * sink 是常态（插充电器/电脑），source 是插 U 盘时给外设供电。
+		 */
+		power-role = "dual";
+		data-role = "dual";
+		try-power-role = "sink";
+
+		sink-pdos = <PDO_FIXED(5000, 3000, PDO_FIXED_USB_COMM)>;
+		source-pdos = <PDO_FIXED(5000, 1500, PDO_FIXED_USB_COMM)>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+
+				pm8150b_hs_in: endpoint {
+					remote-endpoint = <&usb_1_dwc3_hs>;
+				};
+			};
 		};
 	};
 };

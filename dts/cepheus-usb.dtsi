@@ -1,0 +1,85 @@
+/*
+ * cepheus USB / OTG / Type-C 板级补充 *
+ * ★ 为什么单独放一个 dtsi：
+ *   以前这些内容直接追加在 sm8150-xiaomi-cepheus.dts 末尾，结果每次跑
+ *   scripts/02-build-kernel.sh（里面会依次跑 apply-dts*.sh）就被冲掉，
+ *   表现出来就是"改了没生效/编译报找不到 pm8150b_hs_in"。
+ *   放进 dtsi、由 apply-dts5.sh 同步并 #include，才能长期存活。
+ *
+ * 参考：同 SoC 的小米 9 Pro（sm8150-xiaomi-raphael.dts）与 sm8250 elish。
+ *
+ * 硬件：USB 口接在 PM8150B 的 Type-C 上，
+ *       - 常态是 sink（当设备，USB 网卡/ADB）
+ *       - 插 OTG 设备时切成 source，由 pm8150b_vbus 对外供 5V
+ */
+
+#include <dt-bindings/usb/pd.h>
+
+/* USB 控制器：从"只能当从机"改成 OTG 双角色 */
+&usb_1 {
+	qcom,select-utmi-as-pipe-clk;
+	status = "okay";
+};
+
+&usb_1_dwc3 {
+	snps,has-lpm-erratum;
+	snps,hird-threshold = /bits/ 8 <0x10>;
+	maximum-speed = "high-speed";
+	dr_mode = "otg";
+	usb-role-switch;
+
+	/* 只用 USB2 phy（与 raphael 一致） */
+	phys = <&usb_1_hsphy>;
+	phy-names = "usb2-phy";
+};
+
+/* dwc3 的 HS 端点 -> Type-C 的 HS 输入端点 */
+&usb_1_dwc3_hs {
+	remote-endpoint = <&pm8150b_hs_in>;
+};
+
+/* OTG 对外输出 5V */
+&pm8150b_vbus {
+	status = "okay";
+};
+
+/* PM8150B 自带 Type-C 控制器：角色检测 + PD */
+&pm8150b_typec {
+	vdd-vbus-supply = <&pm8150b_vbus>;
+	vdd-pdphy-supply = <&vreg_l2a_3p1>;
+	status = "okay";
+
+	connector {
+		compatible = "usb-c-connector";
+
+		/* power-role=dual 时 tcpm 要求 sink-pdos 与 source-pdos 都给，
+		 * 缺任意一个 tcpm_register_port() 就返回 -EINVAL。
+		 */
+		power-role = "dual";
+		data-role = "dual";
+		try-power-role = "sink";
+
+		sink-pdos = <PDO_FIXED(5000, 3000, PDO_FIXED_USB_COMM)>;
+		source-pdos = <PDO_FIXED(5000, 1500, PDO_FIXED_USB_COMM)>;
+
+		/* 给了 sink-pdos 之后这个属性就是**必填** ——
+		 * tcpm_fw_get_caps() 里没有它就返回 -EINVAL，
+		 * 表现出来只是 "tcpm_register_port failed -22"，很难看出原因。
+		 * 0.5W 是手机常见的"运行功耗"，只影响 PD 供电协商的上限。
+		 */
+		op-sink-microwatt = <500000>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+
+				pm8150b_hs_in: endpoint {
+					remote-endpoint = <&usb_1_dwc3_hs>;
+				};
+			};
+		};
+	};
+};

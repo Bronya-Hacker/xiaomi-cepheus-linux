@@ -24,12 +24,25 @@ KDIR="${1:-${KDIR:-/root/build/linux}}"
 DTS="$KDIR/arch/arm64/boot/dts/qcom/sm8150-xiaomi-cepheus.dts"
 SRC="$HERE/dts/cepheus-cam-ir-nfc.dtsi"
 DST="$(dirname "$DTS")/cepheus-cam-ir-nfc.dtsi"
+USBSRC="$HERE/dts/cepheus-usb.dtsi"
+USBDST="$(dirname "$DTS")/cepheus-usb.dtsi"
 BOARDSRC="$HERE/dts/sm8150-xiaomi-cepheus.dts"
 
 [ -f "$DTS" ] || { echo "找不到 $DTS" >&2; exit 1; }
 [ -f "$SRC" ] || { echo "找不到 $SRC" >&2; exit 1; }
 
 cp -a "$SRC" "$DST"
+
+# USB / OTG / Type-C 也走 dtsi（直接追加到 .dts 末尾会被 apply-dts*.sh 冲掉）
+if [ -f "$USBSRC" ]; then
+	cp -a "$USBSRC" "$USBDST"
+	if grep -q 'cepheus-usb.dtsi' "$DTS"; then
+		echo "OK USB dtsi 已在 DTS 里（不动）"
+	else
+		printf '\n#include "cepheus-usb.dtsi"\n' >> "$DTS"
+		echo "OK 已追加 #include \"cepheus-usb.dtsi\""
+	fi
+fi
 
 # ★ 千万不要把仓库的 dts/sm8150-xiaomi-cepheus.dts 覆盖到内核树！
 #   仓库那份是**干净的主线板级 DTS**（没有 UFS / 充电 / 触摸 / 蓝牙等补丁），
