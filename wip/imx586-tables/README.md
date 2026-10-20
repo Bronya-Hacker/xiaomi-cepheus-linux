@@ -66,3 +66,22 @@ https://gh-proxy.com/https://raw.githubusercontent.com/rockchip-linux/kernel/dev
 3. 传感器电源：VANA/VDIG/VIO/VAF + MCLK 24 MHz + reset/pwdn GPIO
    （参考下游 `cepheus-camera-sensor.dtsi`）；
 4. 然后 `media-ctl -p` 应出现 `imx586` 实体，接 `csiphy0` → `csid0` → `vfe0` 出第一帧。
+
+## CCI + DT 进度（2026-10-20 14:09）
+
+- `i2c-qcom-cci` 加了 `qcom,sm8150-cci → cci_v2_data`（和 sdm845/sm8250 同代）；
+- `sm8150.dtsi` 加了 CCI 节点：
+  - `cci@ac4a000`，IRQ 460（下游 DT 的 `0x1cc`），
+    时钟用 camcc 的 `CAM_CC_CPAS_AHB_CLK` / `CAM_CC_CCI_0_CLK_SRC` / `CAM_CC_CCI_0_CLK`；
+  - 子节点 `i2c-bus@0`。
+- DTB 编译通过。
+
+### 还差
+
+1. 传感器节点 `camera@1a`（`sony,imx586`）：
+   - `xvclk = <&camcc CAM_CC_MCLK0_CLK>`；
+   - `avdd/dovdd/dvdd` 三路电源 —— **真实 PMIC 轨还没确认**（下游 DT 不在公开仓库里，
+     需要从 `dtbo.img` 或 vendor kernel 的 `cepheus-camera-sensor.dtsi` 里挖）；
+   - `reset-gpios` / `pwdn-gpios`（TLMM 引脚号同样是下游数据）。
+2. camss 的 sensor→csiphy 链路：camss 的 csiphy 子设备没有 of_graph 端口，
+   要看 camss-core 的 async notifier 期望什么形式的 endpoint。
