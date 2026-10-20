@@ -1,0 +1,209 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Xiaomi Mi 9 (cepheus) —— 相机 / 红外 / NFC 的板级补充
+ *
+ * 由 scripts/apply-dts5.sh 追加到 sm8150-xiaomi-cepheus.dts 末尾，
+ * 这样 07-rebuild-all 之类的完整重建不会把它冲掉。
+ *
+ * 相机部分目前状态：SoC 侧全部打通（时钟/GDSC/CCI/camss），
+ * 但模组本身不上电，详见 docs/camera-port.md §15。
+ */
+
+/ {
+	/* 相机 VIO：1.8V，GPIO132 使能（原厂 camera_viodd_ldo） */
+	cam_vio: regulator-cam-vio {
+		compatible = "regulator-fixed";
+		regulator-name = "cam_vio";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-enable-ramp-delay = <135>;
+		enable-active-high;
+		gpio = <&tlmm 132 GPIO_ACTIVE_HIGH>;
+		regulator-always-on;
+	};
+
+	/* 红外发射管的供电（ir-spi 驱动要求名为 irda_regulator 的电源） */
+	ir_vreg: regulator-ir {
+		compatible = "regulator-fixed";
+		regulator-name = "ir_vreg";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+};
+
+/* ================= 相机 ================= */
+
+&camss {
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			reg = <1>;
+
+			csiphy1_in: endpoint {
+				remote-endpoint = <&imx586_out>;
+				bus-type = <4>;
+				data-lanes = <1 2 3 4>;
+				link-frequencies = /bits/ 64 <400000000>;
+			};
+		};
+	};
+};
+
+&cci1 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&cci1_i2c1_default>;
+};
+
+&cci1_i2c1 {
+	status = "okay";
+
+	imx586: camera@1a {
+		compatible = "sony,imx586";
+		reg = <0x1a>;
+
+		reset-gpios = <&tlmm 30 GPIO_ACTIVE_HIGH>;
+		pwdn-gpios = <&tlmm 59 GPIO_ACTIVE_HIGH>;
+
+		clocks = <&camcc CAM_CC_MCLK1_CLK>;
+		clock-names = "xvclk";
+
+		pinctrl-names = "default", "suspend";
+		pinctrl-0 = <&cam_mclk0_active &cam_reset0_active &cam_vdig0_active>;
+		pinctrl-1 = <&cam_mclk0_suspend>;
+
+		/* IMX586：AVDD 2.8V、DOVDD 1.8V、DVDD 1.1–1.9V
+		 * 原厂 DT 命名是反的（cam_vdig 2.856V 才是 AVDD）
+		 */
+		avdd-supply = <&vreg_l17a_3p0>;
+		dovdd-supply = <&cam_vio>;
+		dvdd-supply = <&vreg_s5a_1p9>;
+
+		port {
+			imx586_out: endpoint {
+				remote-endpoint = <&csiphy1_in>;
+				bus-type = <4>;
+				data-lanes = <1 2 3 4>;
+				link-frequencies = /bits/ 64 <400000000>;
+			};
+		};
+	};
+};
+
+&tlmm {
+	cam_mclk0_active: cam-mclk0-active {
+		pins = "gpio14";
+		function = "cam_mclk";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cam_mclk0_suspend: cam-mclk0-suspend {
+		pins = "gpio14";
+		function = "cam_mclk";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	cam_reset0_active: cam-reset0-active {
+		pins = "gpio30";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cam_vdig0_active: cam-vdig0-active {
+		pins = "gpio59";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cci1_i2c1_default: cci1-i2c1-default {
+		pins = "gpio31", "gpio32", "gpio33", "gpio34";
+		function = "cci_i2c";
+		drive-strength = <2>;
+		bias-disable;
+	};
+};
+
+/* ================= 红外（SPI1 / QUP S1, gpio114-117） ================= */
+
+/* QUP 的 GPI DMA（geni-i2c/spi 需要） */
+&gpi_dma0 {
+	status = "okay";
+};
+
+&gpi_dma1 {
+	status = "okay";
+};
+
+/* IR 在 qupv3_id_0（geniqup@8c0000）下的 spi1 */
+&qupv3_id_0 {
+	status = "okay";
+};
+
+&spi1 {
+	status = "okay";
+
+	irled: ir@0 {
+		compatible = "ir-spi-led";
+		reg = <0>;
+		spi-max-frequency = <19200000>;
+		irda_regulator-supply = <&ir_vreg>;
+	};
+};
+
+/* ================= NFC（NXP NQ, i2c9, 地址 0x28） ================= */
+
+&tlmm {
+	nfc_int_active: nfc-int-active {
+		pins = "gpio47";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	nfc_enable_active: nfc-enable-active {
+		pins = "gpio103";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	nfc_firm_active: nfc-firm-active {
+		pins = "gpio48";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+};
+
+/* NFC 在 qupv3_id_1（geniqup@ac0000）下的 i2c9 */
+&qupv3_id_1 {
+	status = "okay";
+};
+
+&i2c9 {
+	status = "okay";
+
+	nfc: nq@28 {
+		compatible = "nxp,nxp-nci-i2c";
+		reg = <0x28>;
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <47 IRQ_TYPE_EDGE_RISING>;
+		interrupt-names = "nfc_irq";
+
+		enable-gpios = <&tlmm 103 GPIO_ACTIVE_HIGH>;
+		firmware-gpios = <&tlmm 48 GPIO_ACTIVE_HIGH>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&nfc_int_active &nfc_enable_active &nfc_firm_active>;
+	};
+};

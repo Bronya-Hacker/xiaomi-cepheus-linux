@@ -82,7 +82,7 @@ fi
 #     以前这两步是手敲的，一旦忘了就出现"改了 dts/ 却没生效"的假象
 #     （README 坑 39）。
 # ===========================================================================
-for s in apply-dts.sh apply-dts2.sh apply-dts3.sh apply-dts4.sh; do
+for s in apply-dts.sh apply-dts2.sh apply-dts3.sh apply-dts4.sh apply-dts5.sh; do
 	if [ -f "$HERE/scripts/$s" ]; then
 		echo "----- $s -----"
 		bash "$HERE/scripts/$s" "$K"
