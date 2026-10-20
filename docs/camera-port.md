@@ -408,3 +408,33 @@ sensorDriverData → powerSetting, resolutionInfo, resolutionData,
 3. 输出 `imx586_init_settings[]` / 每模式 `imx586_mode_*_settings[]` 的 C 代码。
 
 拿到表之后，写 v4l2 驱动（参考 `drivers/media/i2c/imx412.c` 的结构）就能出帧。
+
+## 十四、IMX586 的电源/时钟/引脚（从合并后的原厂 DT 里挖到，2026-10-20 14:18）
+
+`qcom,cam-sensor@0`（主摄，**走 CSIPHY1**，`cci-master = 1`）：
+
+| 项 | 原厂值 | 解析 |
+|---|---|---|
+| `cam_vio-supply` | `0x619` | `camera_viodd_ldo`（regulator-fixed / gpio-regulator）1.8 V |
+| `cam_vana-supply` | `0xf0` | `pm8150_s5`（SMPS5）1.9 V |
+| `cam_vdig-supply` | `0x45c` | `pm8150_l17`（LDO17）2.856 V |
+| `cam_clk-supply` | `0x31` | `titan_top_gdsc`（**camcc 的 GDSC，我们还没移植**） |
+| `clocks` | `<0x32 0x4a>` | camcc 的第 0x4a 号时钟（MCLK0） |
+| MCLK0 | TLMM GPIO **14** | `CAMIF_MCLK0` |
+| RESET0 | TLMM GPIO **30** | `CAM_RESET0`，低有效 |
+| VDIG0 | TLMM GPIO **59** | `CAM_VDIG0` 使能 |
+| 电压 | vio 1.8 / vana 1.904 / vdig 2.856 V | 与原厂 `rgltr-*-voltage` 一致 |
+
+### 14.1 结论
+
+要出图还差两件事，都不是"查资料"而是纯工程：
+
+1. **camcc 的 GDSC**（`titan_top_gdsc` 等）——传感器和 VFE 的时钟域都挂在上面，
+   现在 camcc 只导出了时钟没导 GDSC；`cam_clk-supply` 指的就是它；
+2. **DT 电源节点**：pm8150 的 S5/L17 在主线 `pm8150.dtsi` 里已有，
+   `camera_viodd_ldo` 需要自己写一个 gpio-regulator（使能脚也要从原厂 DT 里找）。
+
+### 14.2 顺序
+
+camcc 补 GDSC → DT 加 cci + imx586 节点（电源/GPIO/MCLK）→ 重建 boot 刷机 →
+`modprobe imx586` 看 i2c 上能否读到 ID（0x0186）→ 接 csiphy1 → 出第一帧。
