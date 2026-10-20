@@ -218,6 +218,29 @@ else
 	note "no iio devices"
 fi
 
+# --- 扬声器：CS35L41 功放 + secondary MI2S 引脚复用 -------------------------
+# 功放走 i2c4 的 0x40，音频来自 secondary MI2S（GPIO126-130）。
+# 两个都要看：驱动绑了没、MI2S 引脚 mux 成功没（mux 不了功放就上不了电）。
+_amp=$(ls /sys/bus/i2c/devices/0-0040/driver 2>/dev/null | head -n1)
+if [ -n "${_amp:-}" ]; then
+	ok "speaker amp CS35L41 bound (${_amp})"
+else
+	note "speaker amp CS35L41 not bound (i2c4 未启用 / 驱动未加载)"
+fi
+
+# 引脚复用：看 126 是否被 claim（sec_mi2s）
+if [ -r /sys/kernel/debug/pinctrl/3100000.pinctrl/pinmux-pins ]; then
+	_mux=$(sed -n 's/^pin 126 .*/&/p' /sys/kernel/debug/pinctrl/3100000.pinctrl/pinmux-pins 2>/dev/null | head -n1)
+	case "$_mux" in
+	*"MUX UNCLAIMED"*)
+		note "MI2S pins not muxed (126-129 仍是 UNCLAIMED → 功放拿不到 I2S)" ;;
+	"")	note "MI2S pin 126 state unknown" ;;
+	*)	ok "MI2S pins muxed: ${_mux}" ;;
+	esac
+else
+	note "pinctrl debugfs 不可用，无法确认 MI2S 引脚状态"
+fi
+
 # --- 9) 失败单元 -----------------------------------------------------------
 _nf=$(systemctl --failed --no-legend 2>/dev/null | wc -l)
 if [ "$_nf" = "0" ]; then ok "no failed units"; else
