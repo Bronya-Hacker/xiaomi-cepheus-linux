@@ -369,3 +369,42 @@ dmesg: vfe0/vfe1 各 "6 clocks ok"、IRQ 183/184，无 oops
 1. DT 加 `iommus = <&apps_smmu 0x840 0x620>, <&apps_smmu 0x860 0x620>;`；
 2. camcc 补 GDSC（IFE_0/IFE_1/TITAN_TOP 等），camss 用 `power-domains = <&camcc ...>`；
 3. 重建 boot → 刷 boot → 重测 test pattern 出帧。
+
+## 十三、从官方 ROM 里挖 IMX586 寄存器表（2026-10-20 13:40）
+
+用户提供了 MIUI 12.5.5 线刷包（`cepheus_images_V12.5.5.0.RFACNXM_...`）。
+逐个分区排查后的结论：
+
+| 分区 | 内容 | 是否有传感器寄存器表 |
+|---|---|---|
+| `vendor.img` | `lib64/camera/com.qti.sensor.imx586.so`（15 KB，`.rodata` 仅 96 B） | ❌ 只是 API stub |
+| `vendor.img` | `com.qti.sensormodule.*.bin`（461 KB，`QTI Chromatix Header`） | ✅ **有** |
+| `vendor.img` | `lib/modules`（34 个 .ko，全是 audio） | ❌ |
+| `boot.img` | 内核 43.9 MB：`cam_sensor`/`csiphy`/`cci` 框架都在 | ❌ 无 `imx586` 字符串 |
+| `system.img` | 只有一行 MIUI 属性字符串 | ❌ |
+
+### 13.1 关键发现：sensormodule .bin 是自描述的
+
+`com.qti.sensormodule.f1a_imx586.bin` 里能直接读到字段名：
+
+```
+QTI Chromatix Header / Parameter Parser V1.3.1 (1807311300)
+sensorDriverData → powerSetting, resolutionInfo, resolutionData,
+                   streamConfiguration, integrationInfo, regSetting,
+                   slaveAddr, registerData, delayUs
+```
+
+即 **每一档分辨率的寄存器序列都在里面**（`regSetting` 下挂 `registerData`/`delayUs` 记录，
+`resolutionData` 下按模式分支）。
+
+结构是"名字 + 3 个 u64 字段"的树（例：`slaveAddr` 节点里能读到 `0x8778` 和寄存器 `0x0304`），
+不是裸数组，所以**需要一个针对该容器的解析器**才能导出成 C 表。
+
+### 13.2 下一步
+
+写 `wip/imx586-tables/parse.py`：
+1. 解析 header 偏移表 → 遍历 `sensorDriverData` 树；
+2. 每个 `resolutionData` 取 `width/height/fps`、`regSetting` 取 `registerData[]` 与 `delayUs[]`；
+3. 输出 `imx586_init_settings[]` / 每模式 `imx586_mode_*_settings[]` 的 C 代码。
+
+拿到表之后，写 v4l2 驱动（参考 `drivers/media/i2c/imx412.c` 的结构）就能出帧。
