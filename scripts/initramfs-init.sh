@@ -139,6 +139,12 @@ for dev in $(ls /dev/sd[a-z]* /dev/mmcblk*p* 2>/dev/null); do
 			if [ -n "$PDIR" ]; then
 				_pok=1
 				mkdir -p /mnt/root/usr/lib/modules /mnt/root/lib
+				# ★ 解压前先清掉本内核版本的旧模块目录。
+				#   tar 只覆盖同名文件、不删除多余文件，所以配置从 =m 改成 =y 之后
+				#   遗留的 .ko 会一直躺在那里：2026-10-21 就被一个陈旧的 rc-core.ko
+				#   坑了半天 —— 它其实已经内建进内核了，但 modprobe 仍然先 insmod
+				#   这个旧文件，报 "Exec format error"，红外一直起不来。
+				rm -rf "/mnt/root/usr/lib/modules/@KVER@" "/mnt/root/lib/modules/@KVER@"
 				if [ -f "$PDIR/mods.tar.gz" ]; then
 					tar xzf "$PDIR/mods.tar.gz" -C /mnt/root/usr/lib/modules/ 2>/dev/null || _pok=0
 				fi
