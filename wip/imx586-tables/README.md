@@ -38,3 +38,31 @@ https://gh-proxy.com/https://raw.githubusercontent.com/rockchip-linux/kernel/dev
 - M1 时钟 ✅、M2 采集管线 ✅（真机验证）
 - M3 数据 ✅（本文）
 - 剩下是纯编码：驱动移植 + DT + 出帧调试
+
+## 移植进度（2026-10-20 13:57）
+
+`imx586-mainline.c` = Rockchip 版去掉私有依赖后的主线版，**已编译成 `imx586.ko`**。
+
+已做的修改：
+
+- 删掉 `rk-camera-module.h` / `rk-preisp.h` / `otp_eeprom.h` 依赖；
+- 删掉 Rockchip 私有功能：`RKMODULE_*` ioctl、module info、OTP、SPD、HDR AE 初始化；
+- 补 `PAD0/PAD_MAX/NO_HDR/V4L2_MBUS_CSI2_CHANNEL_0` 等定义；
+- V4L2 API 升级到 6.17：
+  - `v4l2_subdev_pad_config` → `v4l2_subdev_state`
+  - `v4l2_subdev_get_try_format(sd,cfg,pad)` → `v4l2_subdev_state_get_format(cfg,pad)`
+  - `v4l2_async_register_subdev_sensor_common` → `..._sensor`
+  - `probe(client, id)` → `probe(client)`，`remove` 返回 void
+  - 去掉 `.get_mbus_config` / `.g_frame_interval` / `.s_frame_interval` 旧接口
+- Kconfig：`CONFIG_VIDEO_IMX586`（注意 `select MEDIA_CONTROLLER` 那几行会让 olddefconfig
+  把符号丢掉，改成就 `depends on I2C && VIDEO_DEV` 后正常）
+
+## 还差什么才能出图
+
+1. **CCI**：主线 `i2c-qcom-cci` 支持 sdm845/sm8250/sm8450（都是 `cci_v2_data`），
+   SM8150 的 CCI 同代，加一条 `qcom,sm8150-cci → cci_v2_data` 即可；
+2. **DT**：`sm8150.dtsi` 里目前没有 cci 节点，需要加（`0xac4a000`/`0xac4b000`，
+   时钟用 camcc 的 `cam_cc_cci_0/1_clk`），再加 imx586 的 i2c 节点（地址 0x1A）；
+3. 传感器电源：VANA/VDIG/VIO/VAF + MCLK 24 MHz + reset/pwdn GPIO
+   （参考下游 `cepheus-camera-sensor.dtsi`）；
+4. 然后 `media-ctl -p` 应出现 `imx586` 实体，接 `csiphy0` → `csid0` → `vfe0` 出第一帧。
