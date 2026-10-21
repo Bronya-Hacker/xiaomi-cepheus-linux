@@ -746,3 +746,51 @@ CS35L41 的时钟配置有**两个层次**，机器驱动只做了一半：
 - `q6afe-dai.c` 里 `I2SDBG`：打印实际下给 DSP 的端口参数
   （实测 `id=22`(QUATERNARY_MI2S_RX) `rate=48000 bits=16 ch=2 fmt=0 sd_mask=0x1`）
 - `cs35l41-lib.c`：失败时 dump `STATUS1/2/3/4 + PWR_CTRL1/2 + OTP + FS_MON0`
+
+---
+
+## 追加13：★★ 功放已经能上电了！（2026-10-21 18:30）
+
+### 里程碑
+
+`Main AMP` widget 实测 **`On`** 持续可见，`Enable(1) failed: -110` 完全消失。
+也就是说 CS35L41 的 PLL 锁上了、GLOBAL_EN 等到了 `PUP_DONE`。
+
+### 修掉的三个真 bug（按发现顺序）
+
+1. **PLL 从来没被启用** —— 只调了 `snd_soc_dai_set_sysclk()`（只写频率监测窗口），
+   而真正选参考源 + 使能 PLL 的是 `snd_soc_component_set_sysclk()`。
+2. **MI2S 分支没给 codec 设 DAI 格式** —— `sm8150_snd_startup()` 只处理了 TDM 和 SLIM，
+   MI2S 落到 default 分支（日志 `invalid dai id 0x16`），codec 保持默认 ASP 配置，
+   和 SoC 抢时钟。而且要带 `SND_SOC_DAIFMT_I2S`，只写 `CBC_CFC` 会被
+   cs35l41 判为 "Invalid or unsupported DAI format"。
+3. **PLL 参考频率传错** —— `cs35l41_pll_sysclk[]` 表里是**时钟频率**
+   （32768 ~ 6.4MHz+），不是采样率。之前一律传 48000：
+   - LRCLK 碰巧对（48k）
+   - **SCLK 必须传 1536000**（48k × 32）
+   - MCLK 必须传 12288000
+   
+   实测只有 `codec_clk_id=0`(SCLK) + 1536000 这一组能上电。
+
+### 关于 pin 的确认（来自原厂 DT）
+
+- `quat_mi2s_active` = **gpio137/138（SCLK/WS）**，`quat_mi2s_sd0_active` = gpio139，
+  `quat_mi2s_sd1_active` = gpio140 —— 和我们 mux 的完全一致。
+- **`quat_mi2s_mclk`(gpio136) 根本没被 `sound-tavil` 引用**
+  → 功放是从**位时钟 SCLK** 取参考的，不需要 MCLK。这解释了为什么 mclk_id 怎么调都没用。
+
+### 还剩的问题：DSP 不消费数据
+
+现在 `aplay` 报的 EIO 其实是 ALSA core 的
+**"playback write timeout (DMA or IRQ trouble?)"**（`sound/core/pcm_lib.c:2027`）：
+FE 会话起来了，但 DSP 一个 period 都不消费 → 1 秒超时。
+
+- SLIM 通路一切正常（对照组），只有 MI2S 通路这样。
+- AFE 端口配置正确：`id=22(QUATERNARY_MI2S_RX) rate=48000 bits=16 ch=2 sd_mask=0x1`
+  → 内部映射到 `AFE_PORT_ID_QUATERNARY_MI2S_RX = 0x1006`，
+  `q6afe_port_start()` 没有报错。
+- 怀疑点：**ADM matrix map 的时机** —— 我们先用 `amixer` 设路由（触发 map），
+  之后 aplay 在 prepare 里 `q6afe_port_stop()` + 重新 start，
+  map 可能因此失效，导致 COPP 没有接到运行中的端口上。
+
+下一步方向：让 q6routing 在 BE prepare 之后再 map 一次（或在 port start 后重发 map）。
