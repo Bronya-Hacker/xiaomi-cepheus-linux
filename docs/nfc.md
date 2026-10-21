@@ -262,3 +262,53 @@ failed to register clk 'div_clk1' (-EEXIST)
 
 `/sys/class/gpio` 没编进内核（用 `gpioset` 的 GPIO v2 uAPI 代替），
 写了个 `tools/nfc-pulse.c` 可以精确做 VEN 脉冲 + 发 NCI 命令。
+
+### 追加：三路 PMIC 分频时钟全部跑起来了（06:35）
+
+修掉 clkdiv 驱动的**命名冲突**（硬编码 `div_clk%d`，PM8150 与 PM8150L 撞名
+导致第二个 `-EEXIST` 注册失败），改为优先使用 DT 的 `clock-output-names`。
+
+现在：
+
+```
+pm8150_div_clk1    rate=19200000  enable=1
+pm8150_div_clk2    rate=19200000  enable=1
+pm8150l_div_clk1   rate=300000    enable=0   ← 这路设不上 19.2MHz
+```
+
+NFC 驱动依次把它们都挂上（`nfc_clk` / `nfc_clk2` / `nfc_clk3`）。
+
+**但芯片仍然：ACK 地址、接受写入、IRQ 会响应，读恒为 0。**
+
+### 当前的确定与不确定
+
+**确定：**
+
+- 芯片有电（I2C 从机能应答 0x28）
+- 芯片对 CORE_RESET 有反应（IRQ 从 0 变 1）
+- 无论等 10ms / 100ms / 500ms / 1s，读都返回全 0
+- 无论读 1/3/6/10/12/16/32 字节，都是全 0
+- `CLKREQ` 在 VEN 高时被芯片主动拉低（=0）
+
+**不确定：**
+
+- `CLKREQ=0` 到底是"请求时钟"还是"时钟就绪"（极性未确认）
+- 若是"请求时钟"，那三路 PMIC 分频器都不是它要的那一路
+- 芯片是否处于固件下载模式（该模式读协议不同）
+
+### 下一步（若继续）
+
+1. 用**示波器/逻辑分析仪**量 NFC 的 CLK 脚最直接 —— 能立刻区分上面两种情况
+2. 或反汇编 vendor 的 `nfc_nci.nqx.default.hw.so`（HAL），看它读之前做了哪些
+   额外步骤（比如先写某个 vendor 命令把芯片唤醒）
+3. 或接受现状：NFC 在主线暂时不通
+
+### 本轮修复的真实缺陷汇总
+
+| # | 缺陷 |
+|---|---|
+| 1 | DT 缺少 PMIC `qcom,spmi-clkdiv` 节点（原厂有 3 个，主线 0 个） |
+| 2 | `CONFIG_SPMI_PMIC_CLKDIV` 没编译 |
+| 3 | clkdiv 索引是 1 基的（0 被拒） |
+| 4 | clkdiv 默认 300kHz，必须先设 19.2MHz |
+| 5 | clkdiv 驱动硬编码名字导致 PM8150/PM8150L 撞名 |
