@@ -139,3 +139,82 @@ snd_soc_update_bits(codec, WCD934X_CDC_CLK_RST_CTRL_FS_CNT_CONTROL,0x10, 0x10);
   这段是空的，说明这些寄存器在主线里被裁掉了）
 - 拿到地址后：先用 debugfs 读一遍确认身份，再用 `dbg_writes` 写 PLL 配置 +
   使能 bit，最后录音验证
+
+---
+
+## 第四轮：拿到完整寄存器头文件，找到 PLL 地址与分页机制（05:10）
+
+### 头文件路径（关键）
+
+厂商 `wcd934x.c` 里是 `#include <asoc/wcd934x_registers.h>`，实际文件在：
+
+```
+techpack/audio/include/asoc/wcd934x_registers.h     ← 119821 字节
+```
+
+抓取命令（ghproxy 可用，raw.githubusercontent 不可用）：
+
+```powershell
+Invoke-WebRequest -UseBasicParsing -TimeoutSec 45 `
+  -Uri 'https://ghproxy.net/https://raw.githubusercontent.com/LineageOS/android_kernel_xiaomi_sm8150/lineage-22.2/techpack/audio/include/asoc/wcd934x_registers.h' `
+  -OutFile wcd934x_registers.h
+```
+
+已存到 `docs/vendor/wcd934x_registers.h`。
+
+### PLL / 时钟寄存器地址（主线全部没有定义）
+
+```
+WCD934X_CLK_SYS_PLL_ENABLES        = 0x070e   /* bit0 = 使能 */
+WCD934X_CLK_SYS_PLL_STATUS         = 0x0710
+WCD934X_CLK_SYS_INT_POST_DIV_REG0  = 0x076c
+WCD934X_CLK_SYS_INT_POST_DIV_REG1  = 0x076d
+WCD934X_CLK_SYS_INT_REF_DIV_REG0   = 0x076e
+WCD934X_CLK_SYS_INT_REF_DIV_REG1   = 0x076f
+WCD934X_CLK_SYS_INT_FILTER_REG1    = 0x0771
+WCD934X_CLK_SYS_INT_PLL_L_VAL      = 0x0772
+WCD934X_CLK_SYS_INT_PLL_N_VAL      = 0x0774
+WCD934X_CLK_SYS_INT_TEST_REG0      = 0x0775
+WCD934X_CLK_SYS_INT_PFD_CP_DSM_PROG= 0x0776
+WCD934X_CLK_SYS_INT_VCO_PROG       = 0x0777
+WCD934X_CLK_SYS_INT_LDO_LOCK_CFG   = 0x0779
+WCD934X_CLK_SYS_INT_DIG_LOCK_DET_CFG = 0x077a
+```
+
+已按厂商值全部写入 + `0x070e=0x01` 使能，实测：
+`0x070e=0x01`（已使能）、`0x0710=0xdf`（PLL 状态，像是锁定了）、
+写进去的 PLL_L/N/POST_DIV 值都能读回 —— **但录音仍为 0**。
+
+### ★ 新发现：模拟寄存器区是分页的
+
+```
+WCD934X_ANA_PAGE_REGISTER     = 0x0600
+WCD934X_ANA_NEW_PAGE_REGISTER = 0x0700
+```
+
+这解释了为什么之前用 `/sys/kernel/debug/regmap/.../registers`
+读 `0x060e`/`0x0a31` 会得到前后不一致的值 —— **读到的是不同页的同名偏移**。
+
+当前 `0x0600 = 0x05`（第 5 页）。
+
+→ 以后读写 ANA 区寄存器（AMIC/MICB/BIAS）必须同时确认页号，
+`dbg_writes` 里也应该先写页寄存器。
+
+### 寄存器量级对比
+
+| | 寄存器定义数 |
+|---|---|
+| 厂商头文件 | 1786 |
+| 主线头文件 | 386 |
+| **厂商有、主线没有** | **1423** |
+
+主线只是厂商驱动的一个精简子集（大量 ANC/MAD/CPE 诊断寄存器都被裁掉了）。
+
+### 当前麦克风状态小结
+
+已依次验证正确但仍为 0 的项：MCLK（9.6MHz 使能）、PLL（配置+使能+状态）、
+ADC 使能位、tx_hold、偏置接线与电压、音量/静音、AMIC1-4、DMIC0-5、
+TX_PATH_CFG0/SEC1 全量扫描、厂商默认值表（可映射部分）。
+
+**下一步**：结合分页机制重新审视 ANA 区写入，并考虑直接移植厂商的
+`tavil_codec_reg_defaults[]` + `tavil_codec_reg_init_*` 整套初始化。
