@@ -312,3 +312,90 @@ NFC 驱动依次把它们都挂上（`nfc_clk` / `nfc_clk2` / `nfc_clk3`）。
 | 3 | clkdiv 索引是 1 基的（0 被拒） |
 | 4 | clkdiv 默认 300kHz，必须先设 19.2MHz |
 | 5 | clkdiv 驱动硬编码名字导致 PM8150/PM8150L 撞名 |
+
+---
+
+# ★★★ NFC 打通了！（2026-10-22 07:40）
+
+```
+$ ./nfc-devup up 0
+内核确认成功                     ← NCI 初始化完成
+$ ./nfc-devup poll 0
+轮询已启动                       ← RF 发现已开始
+$ dmesg | grep -i nfc
+（无任何错误）
+```
+
+## 真正的根因：读事务方式 + 包间填充字节
+
+怀疑了几轮时钟之后，用逐字节试探终于把协议搞清楚了：
+
+### 1. 纯 I2C 读拿不到数据
+
+```
+i2ctransfer r13@0x28                → 00 00 00 00 ...   （永远全 0）
+i2ctransfer w2@0x28 00 00 r13@0x28  → 40 00 01 00 ff 60 00 0a ...  ✅
+```
+
+**必须先写 2 个字节（内容无关）再在同一事务里读。** 这是 SM8150 的
+Geni I2C 控制器对这颗芯片的行为差异。
+
+### 2. 那"5 字节前缀"其实是 CORE_RESET_RSP
+
+一开始以为是固定前缀就跳了 5 字节 —— 结果把 RSP 吃掉，后面全乱。
+真实的数据流是**连续的字节流，包之间有一个 0xFF 填充字节**：
+
+```
+40 00 01 | 00 | ff | 60 00 0a 02 00 20 04 05 00 a4 01 10 07
+RSP 头    负载  填充  NTF 头     NTF 负载
+```
+
+`0xFF` 是总线空闲值（芯片没更多数据时读到的就是 1）。
+
+### 3. 芯片其实一直是好的
+
+决定性实验：
+
+| 发送内容 | IRQ 反应 |
+|---|---|
+| 垃圾 `FF FF FF FF` | 保持低（不响应） |
+| 合法 `CORE_RESET` | 拉高（处理了） |
+
+芯片**完整解析 NCI 协议**，核心一直在运行。
+
+### 4. 需要厂商的上电复位脉冲
+
+厂商 `nfcc_hw_check()` 不是简单把 EN 拉高，而是：
+
+```c
+EN=1 → 10ms → EN=0 → 10ms → EN=1 → 10ms
+```
+
+少了这个脉冲，第二次初始化就 NAK（`Read failed with error -121`）。
+
+## 驱动改动（sound/…/drivers/nfc/nxp-nci/i2c.c）
+
+1. 新增 `nxp_nci_i2c_raw()`：写 2 字节 + 同事务读，失败重试 10 次
+2. 新增环形缓冲 `rx_ring[320]`：按需填充，**每个包开头跳过 0xFF 填充**
+3. `nxp_nci_i2c_recv(phy, buf, len, packet_start)`：从环形缓冲取数
+4. `set_mode()` 加 VEN 复位脉冲
+5. 保留 `nfc_clk` / `nfc_clk2` / `nfc_clk3` 三路时钟使能
+
+## 工具
+
+`tools/nfc-devup.c` —— 通过 NFC netlink 控制设备：
+
+```
+./nfc-devup up 0      # 上电 + NCI 初始化
+./nfc-devup poll 0    # 启动 RF 轮询找卡
+./nfc-devup down 0
+```
+
+注意：`NFC_ATTR_RF_MODE` 必须是 **u8**（不是 u32），否则内核报
+`attribute type 11 has an invalid length`。
+
+## 已知遗留
+
+- **每次开机只能初始化一次**：DEV_DOWN 之后再 UP 仍会超时
+  （芯片需要在两次之间做完整掉电，可能要 CNTRL 时序调整）
+- 还没验证实际读卡（需要监听 `NFC_CMD_TARGET_FOUND` 事件，或装 libnfc）
