@@ -1,0 +1,14 @@
+[Unit]
+Description=Mi9 speaker audio routing (QUAT MI2S + CS35L41)
+After=sound.target mi9-audio-setup.service
+Wants=mi9-audio-setup.service
+ConditionPathExists=/proc/asound/card0
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/mi9-audio-route.sh
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target

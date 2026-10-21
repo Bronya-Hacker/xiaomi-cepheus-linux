@@ -794,3 +794,42 @@ FE 会话起来了，但 DSP 一个 period 都不消费 → 1 秒超时。
   map 可能因此失效，导致 COPP 没有接到运行中的端口上。
 
 下一步方向：让 q6routing 在 BE prepare 之后再 map 一次（或在 port start 后重发 map）。
+
+---
+
+## 追加14：功放已上电/通路全开，但仍无声（2026-10-21 19:20）
+
+### 已验证正常的（全部实测）
+
+| 项目 | 证据 |
+|---|---|
+| 功放上电 | `OKDBG Enable(1) ok`，`STATUS1=0x01400000`（bit24 PUP_DONE） |
+| PLL 锁 | `STATUS3=0x2000002e`，`PLL_LOCK=1` |
+| 升压目标电压 | `BST_VCTRL1=0x78`（8500mV，主线原本写 0，已修） |
+| 升压使能 | `PWR_CTRL2=0x20` |
+| 功放增益 | `AMP_GAIN=0x280`，`Digital/Analog PCM Volume` 均在最大 |
+| 内部通路 | `AMP Playback: On` → `ASPRX1: On` → `Main AMP: On`、`CLASS H: On` |
+| DSP 送数据 | `aplay` 退出码 0，无超时（FE 正常消费） |
+| 四种数据线 | `sd_line_override=0/1/2/3` 全部播放成功（`sd_line_mask=0x1/0x2/0x4/0x8`） |
+| codec 直推 | WCD9340 只有 `EAR PA Volume`，**没有 SPK 功放控件** → 喇叭不是 codec 直推 |
+
+### 仍无声的两个主要怀疑
+
+1. **PCM 实际走 DSP 而不是 ASP**
+   原厂配置是 `PCM Source=DSP` + `DSP1 Firmware=Protection`。
+   主线默认让 PCM 直连功放；如果这颗芯片的 OTP 把内部通路设成 DSP，
+   直连路径就没有声音。
+   尝试加载 `cs35l41-dsp1-spk-prot.wmfw`（已放进 /lib/firmware）：
+   固件能被解析，但**写 DSP 内存超时**（`Failed to write 18280 bytes at 0 in PM_PACKED: -110`），
+   即使功放已上电、PLL 已锁、强制 SCLK/LRCLK 也照样超时
+   → 怀疑 DSP 需要 **MCLK**（板上 gpio136 未接），或需要原厂的 HALO 引导私有步骤。
+
+2. **喇叭可能不接在这颗功放上**
+   I2C 上确实有 CS35L41（`0x40`，`35a40`），但无法从软件确认它驱动的是主喇叭。
+
+### 已做成的工具/服务
+
+- `mi9-audio-route.service` + `mi9-audio-route.sh`：开机自动设置 QUAT MI2S 路由与音量
+- 模块参数：`codec_clk_id`（PLL 时钟源）、`boost_mv`（升压电压）、
+  `sd_line_override`（MI2S 数据线）—— 都可在运行时调整，方便后续排查
+- 调试打印：`OKDBG`（功放上电后寄存器）、`BOOSTDBG`、`AFEDBG/RTDBG/ASMDBG`（DSP 命令）
