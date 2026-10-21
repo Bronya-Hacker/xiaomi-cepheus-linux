@@ -121,3 +121,101 @@ mi9-bt-speaker once
 
 - 播完一段音频后音箱有时会自己断开，守护会在几秒内自动连回来
 - 内置喇叭仍无声（CS35L41 保护 DSP 引导不了），蓝牙是目前的出声方案
+
+---
+
+## 追加：真正的稳定性根因是「音频栈重复」（2026-10-22 02:35）
+
+### 症状
+
+反复出现「连上一两秒就断开」「没有声音」，但偶尔又能正常出声。极不稳定。
+
+### 根因
+
+设备上同时跑了两套音频栈：
+
+- root 的登录会话（`user@0.service`）自带一套 pipewire/wireplumber
+- 我们的 `mi9-bt-speaker` 守护又在 fallback 里自己起一套
+
+于是出现：
+
+```
+sco_listen: listen(): Address already in use
+register_profile_reply: RegisterProfile() failed: org.bluez.Error.NotPermitted
+```
+
+两个 wireplumber 抢着向 BlueZ 注册 A2DP profile，第二个必然失败，
+结果 A2DP sink 建不出来 —— BlueZ 的 ACL 连上了但没有任何音频传输，
+音箱等一会儿没数据就自己断开。
+
+### 解决
+
+**保证全局只有一份 pipewire / wireplumber / pipewire-pulse**。
+`mi9-bt-speaker` 里加了健康判据，不满足就整体重建：
+
+```sh
+npw=$(pgrep -xc pipewire)
+nwp=$(pgrep -xc wireplumber)
+npl=$(pgrep -xc pipewire-pulse)
+
+# 连得上、wireplumber 只有一份、pulse 兼容层在 → 健康
+if wpctl status >/dev/null 2>&1 && [ "$nwp" = "1" ] && [ "$npl" -ge 1 ]; then
+	return 0
+fi
+
+# 否则：停掉会话单元 + 杀光残留，再各起一份
+systemctl --user stop pipewire-pulse wireplumber pipewire pipewire.socket
+pkill -x pipewire-pulse; pkill -x wireplumber; pkill -x pipewire
+nohup pipewire       >/var/log/mi9-pipewire.log       2>&1 &
+nohup pipewire-pulse >/var/log/mi9-pipewire-pulse.log 2>&1 &
+nohup wireplumber    >/var/log/mi9-wireplumber.log    2>&1 &
+```
+
+改完后：连接稳定、出声正常、重启后自动就绪。
+
+### 第三个坑：`pipewire-pulse` 也要有
+
+普通应用（mpg123、各类播放器）走的是 PulseAudio 接口。只起 `pipewire` +
+`wireplumber` 时：
+
+```
+mpg123: No PulseAudio running. I will not accidentally trigger starting one.
+```
+
+必须把 `pipewire-pulse` 也拉起来（它就是 PulseAudio 兼容层）。
+
+### 第四个坑：播放结束就被断开
+
+A2DP 传输在流结束后会被回收，音箱随即断开 —— 表现为"放完一首就没了"。
+解法就是常驻一路静音流保活（`BT_KEEPALIVE=1`，循环播
+`/usr/share/mi9/silence-60s.wav`）。实测播完歌后空闲 25 秒连接仍在。
+
+### 最终实测结论
+
+| 场景 | 结果 |
+|---|---|
+| 连续播放 60 秒 | 连接稳定，音乐正常 |
+| 播放结束再空闲 25 秒 | 连接保持（靠保活流） |
+| 重启后 | 服务自动启动、音箱自动连接、自动设为默认输出 |
+
+### 用法
+
+```sh
+mi9-bt-speaker status    # 看状态（含保活流、wireplumber 进程数）
+mi9-bt-speaker once      # 手动连一次
+mi9-bt-speaker start     # 守护（systemd 已在跑）
+```
+
+配置 `/etc/mi9-bt-speaker.conf`：
+
+```
+BT_MAC=40:31:3C:81:D6:DA
+BT_VOLUME=0.9
+BT_KEEPALIVE=1     # 强烈建议开：播放间隙不会断
+```
+
+播放音乐：
+
+```sh
+mpg123 -o pulse /path/to/music.mp3
+```

@@ -4,26 +4,33 @@
 # 背景：这台机器的内部喇叭卡在 ADSP/DSP 层，能出数据但没有声音。
 # 蓝牙这条路完全绕开 ADSP：应用 -> PipeWire -> bluez5(A2DP) -> UART -> QCA 芯片 -> 音箱。
 #
-# 关键点（踩过的坑，见 docs/bluetooth.md）：
-#   1. root 没有登录会话，必须自己指定 XDG_RUNTIME_DIR 并手动拉起 pipewire/wireplumber
-#   2. 光有 bluez5 库不够，要装 libspa-0.2-bluetooth 才有 A2DP 端点（否则连接报
-#      br-connection-profile-unavailable）
+# 关键点（踩过的坑，全记在 docs/bluetooth.md）：
+#   1. root 没有登录会话：既没有 XDG_RUNTIME_DIR 也没有会话 D-Bus，
+#      PipeWire/WirePlumber 都起不来（"Cannot autolaunch D-Bus without X11 $DISPLAY"）。
+#      → 自己造 /run/user/0 和一条 unix:path=.../bus 的会话总线。
+#   2. 光有 bluez5 库不够，要装 libspa-0.2-bluetooth 才有 A2DP 端点
+#      （否则连接报 br-connection-profile-unavailable）。
 #   3. WirePlumber 默认空闲 5 秒挂起节点，A2DP transport 一挂起音箱就断开。
-#      用 /etc/wireplumber/bluetooth.lua.d/51-no-suspend-bluez.lua 设
-#      session.suspend-timeout-seconds = 0 解决（本服务依赖它）
-#   4. 用 pw-cat 喂 /dev/zero 当保活流是行不通的（sndfile 不认，进程立刻退出），
-#      真需要保活就用 /usr/share/mi9/silence-60s.wav 循环播放（BT_KEEPALIVE=1）
+#      → /etc/wireplumber/bluetooth.lua.d/51-no-suspend-bluez.lua 里设
+#        session.suspend-timeout-seconds = 0。
+#   4. 同时跑两个 wireplumber 会让蓝牙 profile 注册失败：
+#        sco_listen: listen(): Address already in use
+#        register_profile_reply: RegisterProfile() failed: org.bluez.Error.NotPermitted
+#      结果永远生成不出 A2DP sink。user@0 会话自带一套音频栈，所以这里
+#      **优先复用会话里那套**，实在没有才自己起，且起之前把残留的全部清掉。
+#   5. 拿 /dev/zero 当静音流保活行不通（sndfile 不认，进程立刻退出），
+#      真要保活就循环播 /usr/share/mi9/silence-60s.wav（BT_KEEPALIVE=1）。
 #
 # 用法：
-#   mi9-bt-speaker start   启动守护循环（systemd 用这个）
-#   mi9-bt-speaker once    只连接一次并设为默认输出，不常驻
+#   mi9-bt-speaker start   守护循环（systemd 用这个）
+#   mi9-bt-speaker once    只连接一次并设为默认输出
 #   mi9-bt-speaker status  看状态
 #   mi9-bt-speaker stop    停止
 #
 # 配置（也可写进 /etc/mi9-bt-speaker.conf）：
 #   BT_MAC=40:31:3C:81:D6:DA   音箱 MAC
 #   BT_VOLUME=0.8              音量（1.0 = 100%）
-#   BT_KEEPALIVE=0             是否额外用静音流保活（默认关，靠 no-suspend 规则）
+#   BT_KEEPALIVE=0             额外静音流保活（默认关，靠 no-suspend 规则）
 
 set -u
 
@@ -41,23 +48,54 @@ BT_KEEPALIVE="${BT_KEEPALIVE:-$BT_KEEPALIVE_DEFAULT}"
 
 log() { logger -t mi9-bt-speaker "$*"; echo "$*"; }
 
+# root 没有登录会话，得自己准备运行时目录 + 会话 D-Bus
 setup_runtime() {
 	mkdir -p "$RUNTIME_DIR"
 	chmod 700 "$RUNTIME_DIR"
 	export XDG_RUNTIME_DIR="$RUNTIME_DIR"
+
+	if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+		if [ ! -S "$RUNTIME_DIR/bus" ]; then
+			dbus-daemon --session --address="unix:path=$RUNTIME_DIR/bus" \
+				--nofork --nopidfile >/dev/null 2>&1 &
+			i=0
+			while [ ! -S "$RUNTIME_DIR/bus" ] && [ $i -lt 20 ]; do
+				sleep 0.2; i=$((i + 1))
+			done
+		fi
+		[ -S "$RUNTIME_DIR/bus" ] && {
+			DBUS_SESSION_BUS_ADDRESS="unix:path=$RUNTIME_DIR/bus"
+			export DBUS_SESSION_BUS_ADDRESS
+		}
+	fi
 }
 
+# 音频栈可用才算数（wpctl 连得上）
 ensure_audio_stack() {
-	pgrep -x pipewire >/dev/null 2>&1 || {
-		log "启动 pipewire"
-		nohup pipewire >/var/log/mi9-pipewire.log 2>&1 &
-		sleep 2
-	}
-	pgrep -x wireplumber >/dev/null 2>&1 || {
-		log "启动 wireplumber"
+	if wpctl status >/dev/null 2>&1; then
+		return 0
+	fi
+
+	# 1) 先让 root 的 user 会话把自带的音频栈拉起来（优先复用，避免两份并存）
+	systemctl start user@0.service >/dev/null 2>&1
+	i=0
+	while [ $i -lt 12 ]; do
+		sleep 1
+		wpctl status >/dev/null 2>&1 && { log "已用 user@0 会话自带的音频栈"; return 0; }
+		i=$((i + 1))
+	done
+
+	# 2) 会话那套没起来，才自己起一份：先把所有残留清干净，保证只剩一个 wireplumber
+	log "会话音频栈不可用，自己起 pipewire / wireplumber"
+	systemctl --user stop wireplumber pipewire pipewire.socket >/dev/null 2>&1
+	pkill -x wireplumber 2>/dev/null
+	sleep 1
+	pgrep -x wireplumber >/dev/null 2>&1 || \
 		nohup wireplumber >/var/log/mi9-wireplumber.log 2>&1 &
-		sleep 2
-	}
+	sleep 3
+	pgrep -x pipewire >/dev/null 2>&1 || \
+		nohup pipewire >/var/log/mi9-pipewire.log 2>&1 &
+	sleep 2
 }
 
 bt_connected() {
@@ -93,7 +131,7 @@ start_keepalive() {
 		log "缺少 /usr/share/mi9/silence-60s.wav，跳过保活"
 		return 1
 	}
-	setsid sh -c "while :; do pw-play --target '$node' /usr/share/mi9/silence-60s.wav || sleep 1; done" \
+	setsid sh -c "export XDG_RUNTIME_DIR=$RUNTIME_DIR; while :; do pw-play --target '$node' /usr/share/mi9/silence-60s.wav || sleep 1; done" \
 		>/var/log/mi9-bt-keepalive.log 2>&1 &
 	echo $! > "$KEEPALIVE_PID"
 	log "静音保活流已启动 (pid $(cat "$KEEPALIVE_PID"))"
@@ -163,6 +201,8 @@ do_status() {
 	printf '音箱 MAC   : %s\n' "$BT_MAC"
 	printf '已配对     : %s\n' "$(bt_paired && echo 是 || echo 否)"
 	printf '已连接     : %s\n' "$(bt_connected && echo 是 || echo 否)"
+	printf '音频栈     : %s\n' "$(wpctl status >/dev/null 2>&1 && echo 正常 || echo 未运行)"
+	printf 'wireplumber: %s 个进程\n' "$(pgrep -c -x wireplumber 2>/dev/null || echo 0)"
 	printf '保活流     : %s\n' "$(keepalive_running && echo 运行中 || echo '未启用/未运行')"
 	printf '守护进程   : %s\n' "$([ -f "$DAEMON_PID" ] && kill -0 "$(cat "$DAEMON_PID" 2>/dev/null)" 2>/dev/null && echo 运行中 || echo 未运行)"
 	echo "--- 当前输出设备 ---"

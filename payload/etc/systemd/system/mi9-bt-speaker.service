@@ -1,8 +1,8 @@
 [Unit]
 Description=Mi9 Bluetooth speaker audio bridge (auto connect + keep-alive)
 Documentation=file:/usr/local/sbin/mi9-bt-speaker.sh
-After=bluetooth.service
-Wants=bluetooth.service
+After=user@0.service bluetooth.service
+Wants=bluetooth.service user@0.service
 
 [Service]
 Type=simple
