@@ -1058,3 +1058,49 @@ r3.38 镜像已包含该默认值。
 - mainline `wcd934x` 是否实现了 SLIMbus 通道申请（`slim_stream_alloc`）
 - `qcom,slim-ngd-ctrl` 分配了哪些通道（`SLIM SAT` 日志 / `slim_stream` debugfs）
 - 把框架分配到的通道号透传给 codec 的 `set_channel_map`
+
+---
+
+## 追加20：SLIMbus 通道必须由框架分配（2026-10-21 21:50）
+
+### 又挖到一层：`wcd934x_slim_set_hw_params()` 用不到通道
+
+```c
+	list_for_each_entry(ch, slim_ch_list, list) {   /* ← 列表此时是空的 */
+		cfg->ch_count++;
+		payload |= 1 << ch->shift;
+	}
+	...
+	cfg->chs = kcalloc(cfg->ch_count, ...);         /* ch_count=0 */
+```
+
+`slim_ch_list` 要等 DAPM 上电（`SLIM TX0` 的 put 回调）才登记，
+而 `hw_params` 比它早 → `ch_count=0` → **端口寄存器根本没写 payload** →
+codec 一个采样都不发（录出来全 0）。
+
+已在 `wcd934x.c` 加退化路径（`SLIMFB` 日志）：列表为空时用
+`slim_set_channel_map()` 设进来的通道号自己建配置并写端口寄存器。
+
+### 但强行给通道号会让 SLIMbus 卡死
+
+实测（`kernelfat` r3.39，`slim_tx_ch_base=128`）：
+
+```
+arecord → 进程进入 D 状态（不可中断），kill -9 无效，
+          并且后续 reboot 也被阻塞，只能长按电源强制重启
+```
+
+说明 128/129 这两个通道**在 SLIMbus 上并不存在**（没有经过
+`slim_stream_prepare()` → `slim_alloc_chan()` 的分配）。
+
+### 结论
+
+通道号必须来自 **SLIMbus 框架的分配结果**，不能凭空指定。
+下次的方向：
+
+1. 在 `wcd934x_trigger` 的 `slim_stream_prepare()` 之后，把框架实际分配的
+   `sruntime->ch[]` 读出来，反写进 codec 的端口寄存器
+2. 或者让 AFE 侧使用与 codec 相同的通道（需要先知道框架分了哪些）
+3. 检查 `slim-ngd` 的 `slim_stream` debugfs / `SLIM SAT` 日志
+
+`slim_tx_ch_base` 默认已恢复 **-1**（不覆盖），避免再卡死系统。
