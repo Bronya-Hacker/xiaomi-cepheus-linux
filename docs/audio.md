@@ -1010,3 +1010,51 @@ amixer -c 0 cset name='AMIC MUX0' ADC1
 amixer -c 0 cset name='ADC1 Volume' 100%
 amixer -c 0 cset name='DEC0 Volume' 100%
 ```
+
+---
+
+## 追加19：采集又挖出两个坑（2026-10-21 21:30）
+
+### 坑 1：还有一个隐藏开关 `SLIM TX0`
+
+wcd934x 里 SLIMbus TX 端口是单独的 `SOC_SINGLE_EXT("SLIM TX0", ...)`，
+它不只是开关，还负责把该端口登记到 `slim_ch_list`（通道列表）。
+只设 `CDC_IF TX0 MUX` 是不够的，必须：
+
+```sh
+amixer -c 0 cset name='SLIM TX0' 1
+```
+
+打开后整条链路才真正全 On：
+
+```
+SLIM TX0: On  AIF1_CAP Mixer: On  MIC BIAS1: On  AMIC1: On  ADC1: On
+```
+
+### 坑 2：`wcd934x_set_channel_map()` 拒绝 NULL 槽位
+
+```c
+if (!tx_slot || !rx_slot)
+        return -EINVAL;      /* 采集时我们只传 tx，rx 传了 NULL → 永远失败 */
+```
+
+这个错误被 `sm8150_slim_snd_hw_params()` 里的 `pr_err` 埋掉了，加打印才看到
+`codec set_channel_map failed: -22`。
+
+改成 `set_channel_map(codec_dai, tx_cnt, tx_ch, 1, rx_dummy)` 后不再报错，
+**但采集进程立刻卡在 `D` 状态**（不可中断睡眠），甚至阻塞了后续 `reboot`。
+
+### 结论：SLIMbus 通道必须由框架分配，不能硬填
+
+强塞 128/129（或 0/1）都会让 SLIMbus 侧等一个永远不会来的 ACK。
+正确做法应该是用 `slim-ngd` / SLIMbus 框架分配出来的通道号
+（`slim_stream_alloc`），而不是写死。
+
+已把 `slim_tx_ch_base` 默认改成 **-1（不覆盖）**，避免再卡死；
+r3.38 镜像已包含该默认值。
+
+### 下次要查
+
+- mainline `wcd934x` 是否实现了 SLIMbus 通道申请（`slim_stream_alloc`）
+- `qcom,slim-ngd-ctrl` 分配了哪些通道（`SLIM SAT` 日志 / `slim_stream` debugfs）
+- 把框架分配到的通道号透传给 codec 的 `set_channel_map`
