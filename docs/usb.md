@@ -113,4 +113,21 @@ input: SEMICO USB Gaming Keyboard → 4 个输入节点（kbd + consumer + syste
 - **USB 网卡 + OTG 同时用**：Type-C 口只有一个，两者互斥，靠自动切换。
 - 键盘已经能直接打字（`event5`，`kbd` handler），控制台可用。
 
+### ★ 最终方案：不看 CC，看 VBUS 方向
 
+实测发现 tcpm 的 CC 判断在本机有偏差：**插电脑（DFP）会被读成 `not_dfp`**，
+于是 tcpm 认为该当 host，dwc3 就不以设备身份挂总线，`usb0` 起不来。
+
+改用 PMIC 上更可靠的判据（`mi9-usb-role.sh`）：
+
+| 条件 | 判定 | 依据 |
+|---|---|---|
+| `usb_vbus` 有使用者（我们在对外供 5V） | **host** | 正在给外设供电 |
+| 其它（外部 VBUS 进来 / 什么都没插） | **device** | 从电脑取电、或保持 USB 网卡可用 |
+
+实测两条都通：
+
+```
+插扩展坞+键盘 → vbus_users=1 charger_online=0 → host  → 键盘 4 个输入节点
+插电脑        → vbus_users=0 charger_online=1 → device → usb0 恢复
+```

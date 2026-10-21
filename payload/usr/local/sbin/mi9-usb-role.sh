@@ -1,53 +1,64 @@
 #!/bin/sh
-# mi9-usb-role.sh —— 把 Type-C（tcpm）的判断同步给 dwc3 的 role switch
+# mi9-usb-role.sh —— 决定 dwc3 该当 host 还是 device，并写进 role switch
 #
-# 背景：主线里 tcpm 应该通过 device-tree graph 自动找到 dwc3 的 role switch，
-# 但在这台机器上没接上（见 docs/usb.md）。结果 Type-C 层判断是对的
-# （插 OTG 设备时 data_role=host），dwc3 却一直停在 device 模式。
+# ★ 为什么不直接用 Type-C（tcpm）的 data_role：
+#   本机 tcpm 的 CC 判断有偏差 —— 插电脑（DFP）会被读成 not_dfp，
+#   于是它认为该当 host，dwc3 就不会以设备身份挂上总线，
+#   usb0 起不来、USB 网卡断掉（2026-10-21 实测）。
 #
-# 这个脚本就是补那一环：轮询 /sys/class/typec/port0/data_role，
-# 一旦和 dwc3 当前 role 不一致就写一次 /sys/class/usb_role/*/role。
+# 改用更可靠的判据（都来自 PMIC，和 CC 无关）：
+#   1) 我们自己在对 Type-C 口供 5V（usb_vbus 有使用者 = 在给外设供电）→ host
+#   2) 外部有 VBUS 进来（pm8150b-charger online=1 = 在从电脑取电）    → device
+#   3) 什么都没插                                                      → device
+#      （保持 device，这样 USB 网卡随时可用）
 #
-# 前提：内核里给 dwc3 的 role switch 打开了 allow_userspace_control
-#       （drivers/usb/dwc3/drd.c 的本地补丁），否则 role 文件不存在。
-
+# 实测：
+#   插 USB-C 扩展坞 + 键盘 → vbus_users=1 charger_online=0 → host，键盘可用
+#   插电脑                  → vbus_users=0 charger_online=1 → device，usb0 恢复
 set -u
 
-TC=/sys/class/typec/port0/data_role
 RS=/sys/class/usb_role/a600000.usb-role-switch/role
-
-# sysfs 里 data_role 的格式是 "host [device]" 或 "device [host]"，
-# 第一段是当前值。
-cur_tc_role() {
-	[ -r "$TC" ] || return 1
-	awk '{print $1}' "$TC" 2>/dev/null
-}
+CHG=/sys/class/power_supply/pm8150b-charger/online
 
 log() { logger -t mi9-usb-role "$*"; }
 
-# 等 role switch 出现（dwc3 probe 比 typec 晚）
+vbus_users() {
+	ls -d /sys/class/regulator/regulator.* 2>/dev/null | while read -r r; do
+		[ "$(cat "$r/name" 2>/dev/null)" = "usb_vbus" ] && {
+			cat "$r/num_users" 2>/dev/null
+			break
+		}
+	done
+}
+
+# role switch 是 dwc3 probe 时才建的，比 typec 晚
 i=0
 while [ ! -e "$RS" ] && [ $i -lt 120 ]; do
 	sleep 0.5
 	i=$((i + 1))
 done
-[ -e "$RS" ] || { log "role switch 不存在，退出"; exit 0; }
+[ -e "$RS" ] || { log "role switch 不存在（dwc3 未开 allow_userspace_control？），退出"; exit 0; }
 
-log "启动，跟随 $TC 同步到 $RS"
+log "启动（判据：usb_vbus 使用者 / 充电器 online）"
 
 last=""
 while :; do
-	want=$(cur_tc_role) || { sleep 2; continue; }
-	case "$want" in
-	host|device) ;;
-	*) sleep 2; continue ;;
-	esac
+	vu=$(vbus_users)
+	vu=${vu:-0}
+	co=$(cat "$CHG" 2>/dev/null || echo 0)
+
+	if [ "$vu" -gt 0 ]; then
+		want=host
+	else
+		# 外部供电 或 什么都没插 → 都当设备
+		want=device
+	fi
 
 	if [ "$want" != "$last" ]; then
 		now=$(cat "$RS" 2>/dev/null)
 		if [ "$now" != "$want" ]; then
 			if echo "$want" > "$RS" 2>/dev/null; then
-				log "切换 -> $want（Type-C 判定 $want）"
+				log "切换 -> $want (vbus_users=$vu charger_online=$co)"
 			else
 				log "写 $RS 失败"
 			fi
