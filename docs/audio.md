@@ -920,3 +920,39 @@ PWR_CTRL3=0x01000010             DAC_PCM1_SRC=0x8 (ASP)
 2. 反汇编原厂 `cs35l41_set_csplmboxcmd` / `cs35l41_dsp_load_ev`，复刻它的 HALO 引导顺序
 3. 若 DSP 固件始终加载不了，改用"纯 ASP 直连"路线，但要弄清功放为什么不放行
    （可能内部需要有 DSP 的"保护已就绪"信号才解除静音）
+
+---
+
+## 追加17：复刻原厂 POST_PMU 加载时机（2026-10-21 20:20）
+
+反汇编原厂 `cs35l41_dsp_power_ev` / `cs35l41_dsp_load_ev` 得到关键差异：
+
+| | 加载保护固件的时机 |
+|---|---|
+| 原厂 | **POST_PMU**（功放上电**之后**，`cs35l41_dsp_load_ev` 收到 event=2）|
+| 主线 | PRE_PMU（上电**之前**，`cs35l41_dsp_preload_ev`）|
+
+已按原厂改：给 `Main AMP` widget 增加 `SND_SOC_DAPM_POST_PMU`，
+在 `cs35l41_main_amp_event()` 的 POST_PMU 里调用 `wm_adsp_event()`。
+
+结果：
+
+```
+DSPLOAD loading fw at POST_PMU
+DSPLOAD wm_adsp_event failed: -5 (non-fatal)
+```
+
+错误从 `-110`（写 DSP 内存 I2C 超时）变成 `-5`（EIO，`cs_dsp_run` 失败），
+说明时机确实对了，但 **DSP 核仍然起不来**。
+
+已把失败改成**非致命**（`ret = 0`），否则 DAPM 会回滚、连播放都起不来。
+r3.35 实测：`aplay` 退出码 0、系统 0 失败单元，只是仍然没有声音。
+
+### 结论（本阶段）
+
+功放、供电、时钟、DSP→功放的数据通路全部已验证正常，
+**唯一缺口是 CS35L41 内部保护 DSP 无法引导**。要特底解决需要：
+
+- 复刻原厂 ADSP 侧的引导（私有命令，模块里 `cs35l41_set_csplmboxcmd` 等），或
+- 给芯片提供板上没有的常驻 MCLK，或
+- 找到让功放在"DSP 未运行"时也放行输出的配置（保护策略相关寄存器）
