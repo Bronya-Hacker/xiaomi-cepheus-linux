@@ -52,3 +52,67 @@
   `echo 1-0028 > /sys/bus/i2c/drivers/nxp-nci_i2c/unbind`
 - 解绑后芯片默认断电（EN 低）；用 `gpioset -m time -s 20 gpiochip3 103=1` 手动给 EN
 - NXP NCI 的读是**纯 I2C 读**（不带寄存器地址）：`i2ctransfer -y 1 r3@0x28`
+
+---
+
+## 追加：时钟与 FIRM 引脚试验（2026-10-22 00:35）
+
+### 做了什么
+
+1. 给 `nxp-nci-i2c` 驱动打了补丁：按 DT 取 `nfc_clk` 并 `clk_prepare_enable()`
+   （见下面"内核补丁"），并在 NFC 节点加：
+
+   ```dts
+   clocks = <&rpmhcc RPMH_LN_BB_CLK3>;   /* PMIC ln_bb_clk3 = 19.2MHz */
+   clock-names = "nfc_clk";
+   ```
+
+   实测生效：`ln_bb_clk3 rate=19200000 enable=1`，
+   dmesg 有 `NFC: nfc_clk enabled at 19200000 Hz`。
+   （19.2MHz 正好对上 `libnfc-qrd-SN100.conf` 里的 `CLK_FREQ_19_2MHZ`）
+
+2. 也写了 `tools/nci-script.c`：解析原厂 `sn100u_bootup.pnscr`
+   并逐条发送 NCI 命令（原厂 HAL 就是这么初始化的）。
+
+### 结果：仍然没有 NCI 响应
+
+| 试验 | 结果 |
+|---|---|
+| 时钟使能后 `DEV_UP` | ❌ 仍超时（read -121） |
+| 解绑后手动 EN=1 + 写 CORE_RESET | 写成功，**读回全 0x00** |
+| FIRM(48)=0 / FIRM=1（正常/下载模式） | 都读回全 0x00 |
+| CLKREQ(113) 电平 | 一直为 **0**（芯片在请求时钟？还是线路问题） |
+
+### 下一步排查方向
+
+1. **确认 NFC 的参考时钟到底来自哪**：`ln_bb_clk3` 打开后 CLKREQ 仍为 0，
+   说明时钟可能没真正走到 NFC（也许该用 `ln_bb_clk1`，或 PMIC 的 div_clk，
+   而后者在当前 DT 里根本没有节点）。
+2. **回放 `sn100u_bootup.pnscr`**：需要在芯片能响应写的状态下做；目前写能过但无应答。
+3. 用示波器量 NFC 的 26/19.2MHz 时钟脚最直接（用户暂时没有）。
+
+### 内核补丁（不在仓库里，需手动应用）
+
+`drivers/nfc/nxp-nci/i2c.c`：
+
+```c
+#include <linux/clk.h>
+...
+	struct gpio_desc *gpiod_fw;
+	struct clk *nfc_clk;          /* 新增 */
+...
+	phy->nfc_clk = devm_clk_get_optional(dev, "nfc_clk");
+	if (IS_ERR(phy->nfc_clk))
+		return PTR_ERR(phy->nfc_clk);
+	if (phy->nfc_clk) {
+		r = clk_prepare_enable(phy->nfc_clk);
+		if (r)
+			return r;
+		nfc_info(dev, "nfc_clk enabled at %lu Hz\n", clk_get_rate(phy->nfc_clk));
+	}
+```
+
+### 当前设备状态
+
+- r3.46，NFC 驱动绑定正常、`nfc0` 存在、时钟已使能
+- 仍未读到任何卡

@@ -212,6 +212,12 @@
 		enable-gpios = <&tlmm 103 GPIO_ACTIVE_HIGH>;
 		firmware-gpios = <&tlmm 48 GPIO_ACTIVE_HIGH>;
 
+		/* SN100U 的参考时钟来自 PMIC 的 ln_bb_clk3（19.2MHz）。
+		 * CLKREQ 一直拉低表示在请求时钟，没时钟芯片就完全不响应 NCI。
+		 */
+		clocks = <&rpmhcc RPMH_LN_BB_CLK3>;
+		clock-names = "nfc_clk";
+
 		pinctrl-names = "default";
 		pinctrl-0 = <&nfc_int_active &nfc_enable_active &nfc_firm_active &nfc_clkreq_active>;
 	};
