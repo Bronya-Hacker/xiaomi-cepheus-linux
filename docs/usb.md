@@ -8,8 +8,10 @@
 | USB 控制器双角色（dwc3 `dr_mode = "otg"`） | ✅ 已启用 |
 | PM8150B Type-C 控制器（tcpm） | ✅ probe 成功，`/sys/class/typec/port0` 出现 |
 | Type-C 角色识别 | ✅ `port_type = [dual] source sink`、`preferred_role = sink` |
-| dwc3 角色切换（role switch） | 🟡 设备已注册，但 `role` 属性缺失，切换未验证 |
-| USB Host 实际枚举外设 | ⬜ 待插 OTG 设备验证 |
+| dwc3 角色切换（role switch） | ✅ 自动切换（插 OTG 设备 → host；插电脑 → device） |
+| USB Host 实际枚举外设 | ✅ 实测：USB-C 扩展坞 + 游戏键盘，HID 键鼠可用 |
+| OTG 对外 5V（`usb_vbus`） | ✅ `enabled` |
+| U 盘 / 外接存储 | ⬜ `USB_STORAGE=y` 已内建，未实测挂载 |
 
 ## 硬件接线
 
@@ -66,34 +68,49 @@ USB 口接在 **PM8150B** 的 Type-C 上（不是独立 Type-C 控制器）：
    正常现象：`vdd-vbus`（pm8150b_vbus）比 typec 晚注册，重试即成功。
    日志里看到 `-517` 不用管。
 
-## 待验证：Host 模式
+## ✅ Host 模式已打通（2026-10-21 14:13）
 
-当前 `usb_role_switch` 类设备存在（`/sys/class/usb_role/a600000.usb-role-switch`）。
+**实测结果**（插 USB-C OTG 扩展坞 + SEMICO 游戏键盘）：
 
-★ **别被 "没有 role 属性" 误导**：dwc3 注册 role switch 时没有把
-`allow_userspace_control` 设为 true（只有 meson/rtk 那些驱动才设），而
-`usb_role_switch_is_visible()` 只在 `allow_userspace_control` 为真时才导出
-`role` 属性。所以 **dwc3 的 role switch 天生就没有 role 属性**，
-不能据此判断切换有没有接上。
-
-要看切换有没有真的发生，看这两个更靠谱：
-- `cat /sys/class/udc/a600000.usb/state`（`configured` = 还在设备模式）
-- 插上 OTG 设备后 `ls /sys/bus/usb/devices/` 是否出现新设备
-
-**验证方法**：拔掉连电脑的线，用 USB-C OTG 转接头接 U 盘/鼠标，看：
-
-```sh
-mi9-usb                 # 一体式状态
-dmesg | tail            # 期望 "new high-speed USB device"
-ls /sys/bus/usb/devices/ # 期望有设备
-cat /sys/class/typec/port0/data_role
+```
+role = host                              ← dwc3 切到 Host
+udc: （没有）                             ← 不在设备模式
+typec data_role: [host] device
+usb_vbus: enabled                        ← 对外 5V 正常
+USB 设备: 1-1 (USB2.0 HUB) / 1-1.4 (USB Gaming Keyboard)
+input: SEMICO USB Gaming Keyboard → 4 个输入节点（kbd + consumer + system）
 ```
 
-如果一直不切换，下一步：
-- 试 `HOST-boot-cepheus.img`（`dr_mode = "host"` 写死），单独验证
-  「Host 控制器 + VBUS 供电」这条链路。刷它之后 USB 网卡消失，改用 WiFi
-  `192.168.31.177`（已验证可连）；要回退就长按电源 → fastboot → 刷
-  `OTG-boot-cepheus.img`。
-- 若 host 模式能看到 xhci 并枚举出设备，说明硬件没问题，问题只在
-  tcpm→dwc3 的角色联动（graph 连接 / fwnode 匹配）。
+拔掉键盘插回电脑线，`role` 会自动变回 `device`（USB 网卡随之恢复）。
+
+### 为什么之前不切：一是时序，二是内核少了一个开关
+
+1. **`tcpm_register_port()` 首次是 -517**：`pm8150b_vbus` 比 typec 晚注册，
+   重试第二次才成功。日志里此时 `MI9DBG role_sw = none (-517)`，
+   第二次变成 `MI9DBG role_sw = found (0)` —— **tcpm 确实通过 DT graph
+   找到了 dwc3 的 role switch**，这条链路本身是通的。
+
+2. **但 dwc3 的 role switch 默认不接受用户态控制**：
+   `usb_role_switch_is_visible()` 只在 `allow_userspace_control` 为真时才导出
+   `role` 属性，而 dwc3 的 `dwc3_role_switch` 描述符里没设这一项
+   （只有 meson / rtl 那些驱动设了）。本地给 `drivers/usb/dwc3/drd.c`
+   加了一行 `dwc3_role_switch.allow_userspace_control = true;`，
+   `role` 就可读写了。
+
+### 落地实现（三处）
+
+1. `drivers/usb/dwc3/drd.c`：`allow_userspace_control = true`（本地补丁）
+2. `payload/usr/local/sbin/mi9-usb-role.sh` + `mi9-usb-role.service`：
+   一个轻量桥接服务，轮询 `/sys/class/typec/port0/data_role`，
+   和 `/sys/class/usb_role/a600000.usb-role-switch/role` 不一致就写一次。
+   即使将来 tcpm 那条自动链路在某些时序下没接上，这个服务也能兜底。
+3. `mi9-usb` 工具：`mi9-usb` 看状态、`mi9-usb host|device` 手动切。
+
+### 仍然待办
+
+- **U 盘**：`CONFIG_USB_STORAGE=y` 已内建，理论上插上就会出 `/dev/sdb`，
+  但还没实测；外接存储挂载（automount）也没做。
+- **USB 网卡 + OTG 同时用**：Type-C 口只有一个，两者互斥，靠自动切换。
+- 键盘已经能直接打字（`event5`，`kbd` handler），控制台可用。
+
 

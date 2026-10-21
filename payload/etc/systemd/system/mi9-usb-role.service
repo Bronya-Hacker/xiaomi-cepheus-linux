@@ -1,0 +1,16 @@
+[Unit]
+Description=Mi9 USB role bridge (follow Type-C verdict to dwc3)
+After=multi-user.target
+# 只在这台机器上有意义；dwc3 的 role switch 不存在时会自己退出
+ConditionPathExists=/sys/class/typec/port0
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/mi9-usb-role.sh
+Restart=always
+RestartSec=5
+# 别刷屏
+Nice=5
+
+[Install]
+WantedBy=multi-user.target
