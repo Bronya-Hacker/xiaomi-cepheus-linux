@@ -1368,3 +1368,65 @@ module_param(dbg_writes, charp, 0644);
 
 配合 `/sys/kernel/debug/regmap/217:250:1:0/registers`（codec 全寄存器可读），
 以后调 codec 不用反复刷机。
+
+---
+
+## 追加27：驱动内寄存器打印，定位到最后一级（2026-10-22 05:00）
+
+### 为什么要在驱动里打印
+
+`/sys/kernel/debug/regmap/217:250:1:0/registers` 读值是**不可靠的**：
+同一配置多次读，`0x0a31` 得到过 0x04/0x24，`0x0a34` 得到过 0x7c/0x10，
+`0x060e` 得到过 0xb4/0x34。regmap debugfs 落在不同 bank，不能用来判断状态。
+
+改为在 `wcd934x_codec_enable_dec()` 的 POST_PMU 里用 `regmap_read` 直接打印（`DECDUMP`）。
+
+### 真实寄存器（AMIC3 采集时）
+
+```
+DECDUMP dec0 AMIC 34 14 34 54 BIAS 80 INP 0b/01 CTL 24 CFG0 50 CFG1 03 VOL 10 SEC2 01
+```
+
+| 字段 | 值 | 含义 |
+|---|---|---|
+| AMIC1 | 0x34 | bit7=0（ADC1 未使能，正常，没用它） |
+| AMIC2 | 0x14 | bit6=0（tx_hold 未设） |
+| AMIC3 | 0x34 | **bit7=0 → ADC3 模拟使能位没置上** |
+| AMIC4 | 0x54 | — |
+| BIAS | 0x80 | ANA_BIAS |
+| INP mux | 0x0b | 低 3 位=3 → 选 ADC3 ✅ |
+| CTL | 0x24 | bit5=1 → AMIC 源 ✅，bit0-3=4 → 48kHz |
+| CFG0 | 0x50 | 抽取器配置 |
+| VOL | 0x10 | **bit4=1 → TX 静音**（音量 100% 恰好撞上静音位） |
+
+### 两个具体缺陷（都不是根因，但都该修）
+
+1. **ADC 使能位没置**：主线 ADC3 widget 是 `DAPM_ADC_E("ADC3", NULL, ANA_AMIC3, 7, ...)`，
+   但打印显示 bit7 一直是 0（DAPM 却报 On）。手动写 `0x0610=0xb4` 后位对了，**仍为 0**。
+2. **TX 静音位**：`DEC0 Volume` 是 `SOC_SINGLE_S8_TLV(-84, 40)`，值直接写进寄存器，
+   100% = +16dB = **0x10**，恰好等于厂商定义的 TX 静音位 bit4。
+   → 用 99（+15dB = 0x0F）可避开，**仍为 0**。
+
+### DMIC 也试了
+
+DMIC0-5 全部试过，INP mux 正确递增（0x0b/0x13/0x1b/0x23/0x2b/0x33），
+CFG0 切到 DMIC 模式（0xd0），**全部为 0**。
+
+### 最终判断
+
+| 环节 | 状态 |
+|---|---|
+| SLIM TX 数字通路 | ✅ 已验证（RX_MIX 环回采到播放的音） |
+| AMIC/DMIC 选择、偏置、音量、静音位 | ✅ 寄存器全部正确 |
+| **ADC/DEC 转换** | ❌ **输出恒为硬 0** |
+
+模拟麦和数字麦都出 0，且寄存器配置正确 ⟹ **DEC/ADC 块没有时钟或没有被真正启动**，
+不是路由/选择问题。
+
+### 下一步（明天从这里接）
+
+1. **查 codec 的 TX/DEC 时钟**：`WCD934X_CDC_TX*` 区有没有时钟使能寄存器；
+   对照厂商 `tavil_codec_enable_dec` 之前是否有 `tavil_codec_clk_ctrl` 类调用
+2. 检查 MCLK：我们 DT 是 `RPMH_LN_BB_CLK2` + `clock-frequency = 9600000`，
+   厂商 `qcom,tavil-mclk` 也是 9.6MHz，但要确认驱动真的 `clk_prepare_enable` 了
+3. 用示波器量 codec 的 MCLK 脚最直接
