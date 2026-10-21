@@ -1227,3 +1227,32 @@ SLIMbus 的通道分配与端口激活），Linux 侧能做的配置已经做完
 
 再往下需要：反汇编/跟踪 ADSP 侧音频拓扑，或找到 `q6afe` 里缺失的
 "SLIMbus device enable / port connect" 类命令，工作量和扬声器 DSP 那条线类似。
+
+## 追加24：DMIC / 共享通道 / 声道数全试过，仍为 0（2026-10-21 23:10）
+
+本轮又排除了：
+
+| 试验 | 结果 |
+|---|---|
+| **DMIC 路径**（`ADC MUX0=DMIC` + `DMIC MUX0=DMIC0`） | DMIC0/DMIC MUX0/ADC MUX0/MIC BIAS1/SLIM TX0 全 On，**仍 0** |
+| AFE 共享通道 base：128/132/136/144/160/192/224 | 全 0（注释确认共享通道 ID 范围就是 128~255） |
+| 声道数 1 / 2 / 4 | 全 0 |
+| codec 供电：原厂 `cdc-vdd-tx-h`=pm8150_s4(1.8V)、`cdc-vdd-mic-bias`=pm8150l_bob(3.35V) | 两路在本系统**都已在使能状态** |
+| codec 端口寄存器回读 | `chs0=3`（2 通道使能）、`cfg=5`（水位）—— 写入确实生效 |
+| 框架路径 / 跳过框架路径 | 都不阻塞，都 0 |
+
+### 结论（麦克风）
+
+Linux 侧（DAPM、寄存器、通道、供电、格式）全部就绪且可验证，
+但 codec 的数字音频始终没有出现在 SLIMbus 上。
+
+原厂是把整条麦克风通路交给 ADSP 固件（它同时掌管 SLIMbus 主控、通道分配
+和 codec 端口激活）。主线 `q6afe` 只发"端口参数"，缺少让 ADSP 真正打开
+该端口数据通路的环节。
+
+**这条线要和扬声器的 DSP 一样，属于 ADSP 固件层的工作**，短期内难以推进。
+
+### 可行的替代
+
+- USB 麦克风（USB Host 已验证可用，`CONFIG_SND_USB_AUDIO=m`）
+- 或等以后深入研究 ADSP 侧拓扑（需要 ADSP 文档或反汇编 ADSP 固件）
