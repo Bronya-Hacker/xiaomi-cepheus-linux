@@ -703,3 +703,46 @@ cs35l41 0-0040: ASoC: PRE_PMU: Main AMP event failed: -110
    `DSP1 Firmware=Protection` —— 说明厂商靠 DSP 固件做扬声器保护。
    若要完全对齐厂商行为，需要升级到支持 cs_dsp 固件的新版驱动，
    并把 `/vendor/firmware/cs35l41-dsp1-spk-prot.wmfw` 放进 `/lib/firmware`。
+
+---
+
+## 追加12：★ 功放 -110 的真因：CS35L41 的 PLL 从来没被配置（2026-10-21 16:30）
+
+### 怎么一步步定位到的
+
+用寄存器现场（`cs35l41-lib.c` 里加的失败 dump）逐个排除：
+
+| 观测 | 结论 |
+|---|---|
+| `DEVID=0x00035a40` | 芯片活着、I2C 通 |
+| `STATUS4` bit1 = 1 | OTP boot 成功 |
+| `PWR_CTRL1 = 0x1` | GLOBAL_EN 已置位 |
+| `PWR_CTRL2 = 0x20` | boost 使能位写进去了（说明写操作有效、核心在工作） |
+| `STATUS2 = 0` | **没有任何错误标志**（不是短路/过温/欠压保护） |
+| `STATUS3 = 0x20000000` | **bit1 PLL_LOCK = 0 —— 芯片没有可用时钟** |
+| DSP 固件写超时 `-110` | 同一件事的另一种表现（DSP 也要时钟） |
+
+### 真因
+
+CS35L41 的时钟配置有**两个层次**，机器驱动只做了一半：
+
+| 函数 | 作用 | 之前 |
+|---|---|---|
+| `snd_soc_dai_set_sysclk()` | 只写 **FS monitor 窗口**（`TST_FS_MON0`） | ✅ 有调用 |
+| `snd_soc_component_set_sysclk()` | **真正配置并启用 PLL**：选参考源（SCLK/LRCLK/MCLK）、按采样率查表写参考频率、最后 `PLL_CLK_EN=1` | ❌ **从没调用** |
+
+也就是说：PLL 一直是**关闭**状态，芯片内部没有时钟可用，
+`GLOBAL_EN` 之后永远等不到 `PUP_DONE`，于是 1 秒后超时 → `-110`。
+
+### 修法
+
+`sm8150_i2s_snd_hw_params()` 里在调 DAI 的 `set_sysclk` 之前，先调
+`snd_soc_component_set_sysclk(codec_dai->component, clk_id, 0, rate, SND_SOC_CLOCK_IN)`；
+时钟源（0=SCLK / 1=LRCLK / 4=MCLK）仍留在模块参数 `codec_clk_id` 里，
+一次刷机就能把三种都试一遍。
+
+### 顺带加的调试
+
+- `q6afe-dai.c` 里 `I2SDBG`：打印实际下给 DSP 的端口参数
+  （实测 `id=22`(QUATERNARY_MI2S_RX) `rate=48000 bits=16 ch=2 fmt=0 sd_mask=0x1`）
+- `cs35l41-lib.c`：失败时 dump `STATUS1/2/3/4 + PWR_CTRL1/2 + OTP + FS_MON0`
