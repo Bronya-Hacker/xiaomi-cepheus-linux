@@ -168,6 +168,15 @@ md5 源文件与本地副本一致 ✓              ← 4e60e97325cc... 两边�
 file 显示 JPEG 1427x1080 ✓
 ```
 
+写入也通（双向）：
+
+```sh
+echo hello > /tmp/x.txt
+cp /tmp/x.txt "/mnt/mtp/内部存储设备/Download/from-mi9.txt"   # 成功
+cat "/mnt/mtp/内部存储设备/Download/from-mi9.txt"              # 读回内容一致
+rm  "/mnt/mtp/内部存储设备/Download/from-mi9.txt"              # 删除也正常
+```
+
 ### 封成工具：`mi9-mtp`
 
 ```sh
