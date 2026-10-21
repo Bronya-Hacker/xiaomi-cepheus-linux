@@ -1430,3 +1430,82 @@ CFG0 切到 DMIC 模式（0xd0），**全部为 0**。
 2. 检查 MCLK：我们 DT 是 `RPMH_LN_BB_CLK2` + `clock-frequency = 9600000`，
    厂商 `qcom,tavil-mclk` 也是 9.6MHz，但要确认驱动真的 `clk_prepare_enable` 了
 3. 用示波器量 codec 的 MCLK 脚最直接
+
+---
+
+## 追加28：★ 找到并修好了 MCLK 未上电（2026-10-22 05:10）
+
+### 关键发现：采集时 codec 的 MCLK 是关着的
+
+用 DAPM 状态检查：
+
+```
+MCLK: Off        ← 录音时！
+```
+
+`wcd934x_codec_enable_mclk()` 的 DAPM 事件会调用
+`__wcd934x_cdc_mclk_enable()` → `clk_prepare_enable(wcd->extclk)`。
+**MCLK 不上电，ADC/DEC 就没有时钟，必然输出硬 0** —— 这完美解释了
+"RX_MIX 环回（纯数字）能出数据、ADC 通路恒 0"的现象。
+
+### 根因：DT routing 里 MCLK 没接到采集链路
+
+原来只有：
+
+```
+"RX_BIAS", "MCLK",      ← 播放侧，所以环回能工作
+"DMIC0", "MCLK",
+"DMIC2", "MCLK",
+```
+
+**AMIC→ADC 这条采集链路完全没拉 MCLK。**
+
+### 修复
+
+给麦克风输入接上 MCLK：
+
+```dts
+"AMIC1", "MCLK",
+"AMIC3", "MCLK",     /* 手持麦 */
+"AMIC4", "MCLK",
+"DMIC1", "MCLK",
+"DMIC3", "MCLK",
+"DMIC4", "MCLK",
+"DMIC5", "MCLK",
+```
+
+修复后实测：**`MCLK: On`** ✅
+
+### 修完仍为 0，但寄存器全对了
+
+DECDUMP（MCLK On + 手动补 ADC 使能位后）：
+
+```
+dec0 AMIC 34 54 b4 54 BIAS 80 INP 33/01 CTL 24 CFG0 50 CFG1 03 VOL 0f SEC2 01
+              ↑     ↑                                                     ↑
+          AMIC2  AMIC3 bit7=1                                    VOL bit4=0（非静音）
+          bit6=1  =ADC3 使能
+```
+
+| 项目 | 状态 |
+|---|---|
+| MCLK | ✅ On |
+| AMIC3 bit7（ADC3 使能） | ✅ 手动写入后 =1 |
+| AMIC2 bit6（tx_hold） | ✅ =1 |
+| TX 音量/静音位 | ✅ 0x0f，非静音 |
+| 输入 mux | ✅ 选 ADC3 / DMIC0-5 都对 |
+| 采集数据 | ❌ **仍为精确 0** |
+
+### 另一个发现：DAPM 不写 ADC widget 的 reg 位
+
+`ADC3` widget 定义为 `DAPM_ADC_E("ADC3", NULL, ANA_AMIC3, 7, ...)`，
+但实测 DAPM 报 "On" 时 ANA_AMIC3 bit7 **依然是 0**（tx_hold 位同理）。
+厂商驱动定义完全相同，说明 Android 上这个位是别处写的
+（可能在 `tavil_codec_enable_micbias` 或 CLSH 初始化里）。
+
+### 明天从这里接
+
+1. 比对厂商 `tavil_codec_enable_micbias` / CLSH 初始化，看谁写了 AMIC 的 bit7
+2. 用 `dbg_writes` 把 AMIC1-4 的所有"可疑位"组合扫一遍（现在 MCLK 已通，
+   之前的扫描都是在没时钟的情况下做的，**需要重扫**）
+3. 若仍不行 → codec ADC 可能依赖 CPE/MAD 子系统初始化，或该用 USB/蓝牙麦
