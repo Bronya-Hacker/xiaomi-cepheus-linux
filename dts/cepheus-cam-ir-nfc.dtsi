@@ -333,6 +333,7 @@
 
 	audio-routing =
 		"RX_BIAS", "MCLK",
+		"AMIC1", "MIC BIAS1",
 		"AMIC2", "MIC BIAS2",
 		"AMIC3", "MIC BIAS2",
 		"AMIC4", "MIC BIAS2",

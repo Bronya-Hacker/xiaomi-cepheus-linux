@@ -956,3 +956,57 @@ r3.35 实测：`aplay` 退出码 0、系统 0 失败单元，只是仍然没有�
 - 复刻原厂 ADSP 侧的引导（私有命令，模块里 `cs35l41_set_csplmboxcmd` 等），或
 - 给芯片提供板上没有的常驻 MCLK，或
 - 找到让功放在"DSP 未运行"时也放行输出的配置（保护策略相关寄存器）
+
+---
+
+## 追加18：麦克风/采集通路打通到 DAPM，但数据仍为 0（2026-10-21 21:00）
+
+### 一路排查下来搞清的采集链路
+
+```
+FE "MultiMedia1 Mixer"   （控件 'MultiMedia1 Mixer SLIMBUS_0_TX' = 1）
+  → BE "Slimbus Capture" （slimcap-dai-link：cpu=SLIMBUS_0_TX / codec=AIF1_CAP）
+    → codec "AIF1 Capture"
+      → "CDC_IF TX0 MUX"  ★ 必须选 DEC0（默认是 RX_MIX_TX0 → 录出来全 0）
+        → "ADC MUX0"      ★ 选 AMIC 或 DMIC
+          → "AMIC MUX0"   ★ 必须选 ADC1（默认 ADC4 → 链路断）
+            → "ADC1" → "AMIC1" → "MIC BIAS1"
+```
+
+其中 **`ADC1` 的供电在 codec 驱动里写死依赖 `AMIC1`**：
+
+```c
+{ "ADC1", NULL, "AMIC1" }
+```
+
+但我们的 DT 只给 AMIC2/3/4 配了偏置 → 已补上：
+`dts/cepheus-cam-ir-nfc.dtsi` 的 `audio-routing` 增加 `"AMIC1", "MIC BIAS1"`。
+
+### 现在的状态
+
+录音时 DAPM 全绿：
+
+```
+MIC BIAS1: On   AMIC1: On   ADC1: On   AMIC MUX0: On   ADC MUX0: On
+```
+
+**但录到的样本仍然全是 0**（峰值 0）。所以问题已经不在 codec 的模拟/数字前端，
+而在 **SLIMbus TX 数据面**：codec 没把数据送到 AFE 期望的通道上。
+
+### 下次接着查
+
+- AFE 侧收到的 TX 通道是 `map=128,129,130,131`（`SLIMDBG id=3`）
+- 对照 codec 的 `wcd934x_tx_chs` / `wcd934x_set_channel_map()` 是否一致
+- 以及 `qcom,slim-ngd` 的 TX 端口是否真的在收发（`SLIM SAT` 日志、
+  `command[0x10bdb] not expecting rsp` 这类可疑响应）
+
+### 采集用的手动配置（还没进开机服务）
+
+```sh
+amixer -c 0 cset name='MultiMedia1 Mixer SLIMBUS_0_TX' 1
+amixer -c 0 cset name='CDC_IF TX0 MUX' DEC0
+amixer -c 0 cset name='ADC MUX0' AMIC
+amixer -c 0 cset name='AMIC MUX0' ADC1
+amixer -c 0 cset name='ADC1 Volume' 100%
+amixer -c 0 cset name='DEC0 Volume' 100%
+```
