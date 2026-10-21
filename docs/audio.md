@@ -1145,3 +1145,53 @@ r3.40 里加了 `slim_skip_stream=1`（跳过 `slim_stream_prepare/enable`），
 - `slim_tx_ch_base = -1`（不覆盖通道）
 - `slim_skip_stream` 默认为 1（不调用会阻塞的框架流准备）
 - **注意：仍然不要在采集前打开 `SLIM TX0`**，否则会卡死系统
+
+---
+
+## 追加22：采集不再卡死，链路全 On，但数据仍为 0（2026-10-21 22:50）
+
+### 修掉的两个真 bug
+
+1. **`slim_tx_mixer_put()` 的 "PORT is busy" 分支直接 return**
+   —— 端口在上一次录音时已登记，再次打开时它 `return 0`，于是**跳过了
+   `snd_soc_dapm_mixer_update_power()`**，整条 DAPM 链路一直 Off。
+   改成"已登记也继续更新 DAPM"后，`SLIM TX0` 才能正常上电。
+
+2. **`wcd934x_set_channel_map()` 对已在链表上的条目调用 `INIT_LIST_HEAD()`**
+   —— 链表被破坏 → `list_for_each_entry` 死循环 → 进程 `D` 状态、连 reboot 都卡住。
+   改成用**独立数组**（`map_tx[]`/`map_rx[]`）保存通道号，完全不碰链表，
+   并在 `wcd934x_slim_set_hw_params()` 里用它们覆盖列表里的默认 `ch_num`。
+
+### 现在的状态（r3.43）
+
+```
+SLIM TX0 / AIF1_CAP Mixer / AIF1 Capture / CDC_IF TX0 MUX
+/ ADC MUX0 / AMIC MUX0 / ADC1 / AMIC1 / MIC BIAS1   全部 On
+SLIMFB list empty -> use 2 mapped channels (dir 1)
+SLIMSKIP start: chs=2        ← 不再卡死
+```
+
+但录音样本仍然 **全 0**，并且把这些都试过了：
+
+| 试验 | 结果 |
+|---|---|
+| codec 通道号 base = 0/1/2/4/8/128 | 全 0 |
+| AMIC MUX0 = ADC1/ADC2/ADC3/ADC4 | 全 0 |
+| ADC1/ADC2/DEC0 音量拉满 | 全 0 |
+| 只改 AFE 侧通道（不碰 codec） | 全 0 |
+
+### 结论
+
+codec 的数字前端和 DAPM 全部就绪，但 **SLIMbus TX 端口没有真正开始发送**。
+写入 codec 接口设备（ifd）的端口寄存器虽然不再报错/卡死，但数据仍不出现。
+
+最可能：**那个端口需要由 ADSP 侧激活**（原厂就是 ADSP 全权掌管 SLIMbus
+的通道与端口配置），Linux 侧写的寄存器只是"告知"，ADSP 不给这个端口开
+数据通路就永远没有采样。
+
+### 安全默认值
+
+- `slim_cpu_only = 1`（默认只设 AFE 侧）
+- `slim_tx_ch_base = -1`（默认不覆盖）
+- `slim_skip_stream = 1`（默认跳过会阻塞的框架流准备）
+- 即使打开 `SLIM TX0` 也不会再卡死（链表 bug 已修）
