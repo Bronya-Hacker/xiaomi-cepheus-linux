@@ -116,3 +116,20 @@
 
 - r3.46，NFC 驱动绑定正常、`nfc0` 存在、时钟已使能
 - 仍未读到任何卡
+
+---
+
+## 追加：DIV_CLK1 试验（2026-10-22 00:45）
+
+`RPMH_DIV_CLK1`（很多平台用作 NFC 19.2M 时钟源）在本平台**不可用** ——
+`rpmhcc` 没有提供它，`devm_clk_get_optional("nfc_clk")` 直接返回 NULL，
+dmesg 里没有 `nfc_clk enabled`，`/sys/kernel/debug/clk/` 里也没有 `div_clk1`。
+
+所以 DT 里的 `clocks` 回退为 `RPMH_LN_BB_CLK3`（19.2MHz，实测能启用）。
+
+结论：**目前能确认可用的、频率也对得上的只有 ln_bb_clk3**，
+但启用它之后 SN100U 的 NCI 核仍然不响应（读回全 0）。
+
+要真正确定 NFC 的时钟来源，最直接是：
+- 有示波器量芯片的 CLK 脚；或
+- 从 vendor 内核模块/ADSP 配置里找 NFC 时钟的使能路径。
