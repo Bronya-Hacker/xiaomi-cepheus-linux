@@ -467,3 +467,72 @@ $ ./nfc-devup listen
    设备索引，不携带 target 属性。要读卡号需要走 LLCP/raw 通路
    （用 libnfc 或直接发 RF 命令）。
 3. 还没做成开机自启服务 + 应用层读卡工具。
+
+---
+
+# ★★★★★ 读到卡片 UID 了（2026-10-22 07:45）
+
+```
+RX: 61 05 15 01 01 02 00 ff 01 0a 04 00 04 bc 33 55 81 01 08 00 00 00 00 00
+```
+
+按内核 `nci_rf_intf_activated_ntf_packet()` 的解析顺序拆开：
+
+| 字段 | 值 |
+|---|---|
+| MT/GID/OID | `61 05` = RF_INTF_ACTIVATED_NTF |
+| rf_discovery_id | 0x01 |
+| rf_interface | 0x01（Frame） |
+| rf_protocol | 0x02（T2T） |
+| activation_rf_tech_and_mode | 0x00（NFC-A passive poll） |
+| max_data_pkt_payload_size | 0xff |
+| initial_num_credits | 0x01 |
+| rf_tech_specific_params_len | 0x0a |
+| SENS_RES | `04 00` |
+| NFCID1 长度 | 0x04 |
+| **NFCID1（UID）** | **`BC 33 55 81`** |
+| SEL_RES 长度 | 0x01 |
+| SEL_RES | 0x08（MIFARE Classic 1K） |
+
+## ★ 关键的最后一环：发起轮询的 socket 必须保持打开
+
+这是之前"轮询启动了却什么都检测不到"的真正原因：
+
+```
+主线 net/nfc/netlink.c 在 netlink socket 关闭（NETLINK_URELEASE）时，
+如果关闭的正是当初发 START_POLL 的那个 portid，就会自动 nfc_stop_poll()。
+```
+
+实测证据：
+
+```
+$ ./nfc-devup poll 0            # 发完就退出
+TX: 21 03 05 02 00 01 02 01     # RF_DISCOVER (2 个配置，正确)
+RX: 41 03 01 00                 # RSP OK
+TX: 21 06 01 00                 # 1 秒后 RF_DEACTIVATE —— 轮询被自己关掉了
+```
+
+所以工具里 `listen` 必须**自己在同一个进程里做完 DEV_UP + START_POLL + 保持存活**：
+
+```c
+send_cmd(fd, fam, NFC_CMD_DEV_UP, idx);
+start_poll(fd, fam, idx, 0x1f);
+/* 然后 poll() 循环不退出 */
+```
+
+## 顺便澄清两个我先前误判的 OID
+
+| opcode | 实际含义 |
+|---|---|
+| `21 00` | RF_DISCOVER_MAP（OID 0x00） |
+| `21 03` | **RF_DISCOVER（OID 0x03）** ← 之前误以为是 MAP |
+| `21 04` | RF_DISCOVER_SELECT |
+| `21 06` | RF_DEACTIVATE（OID 0x06） |
+
+所以 `21 03 05 02 00 01 02 01` 是正确的发现命令：
+num=2，两个配置分别是 `(00,01)` NFC-A 轮询 和 `(02,01)` NFC-F 轮询。
+
+## 驱动里加的调试
+
+`nxp_nci_i2c_dump()` 把收发的 NCI 原始帧打成 `NCIRAW TX/RX`。
+这是排查这类问题最有用的工具 —— 能看到完整的协议对话。

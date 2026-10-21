@@ -184,11 +184,29 @@ static int start_poll(int fd, int fam, unsigned int idx, unsigned int protos)
 	memcpy((char *)na + NLA_HDRLEN, &idx, sizeof(idx));
 	req.n.nlmsg_len += NLA_ALIGN(na->nla_len);
 
+	/* 同时发 PROTOCOLS 和 IM_PROTOCOLS，确保内核能取到协议位图 */
 	na = (struct nlattr *)((char *)&req + req.n.nlmsg_len);
 	na->nla_type = NFC_ATTR_PROTOCOLS;
 	na->nla_len = NLA_HDRLEN + sizeof(unsigned int);
 	memcpy((char *)na + NLA_HDRLEN, &protos, sizeof(protos));
 	req.n.nlmsg_len += NLA_ALIGN(na->nla_len);
+
+	na = (struct nlattr *)((char *)&req + req.n.nlmsg_len);
+	na->nla_type = NFC_ATTR_IM_PROTOCOLS;
+	na->nla_len = NLA_HDRLEN + sizeof(unsigned int);
+	memcpy((char *)na + NLA_HDRLEN, &protos, sizeof(protos));
+	req.n.nlmsg_len += NLA_ALIGN(na->nla_len);
+
+	printf("send protocols=0x%x idx=%u\n", protos, idx);
+	{
+		int q;
+		unsigned char *pb = (unsigned char *)&req;
+
+		printf("  报文(%u字节):", req.n.nlmsg_len);
+		for (q = 0; q < (int)req.n.nlmsg_len; q++)
+			printf(" %02x", pb[q]);
+		printf("\n");
+	}
 
 	na = (struct nlattr *)((char *)&req + req.n.nlmsg_len);
 	na->nla_type = NFC_ATTR_RF_MODE;
@@ -313,6 +331,10 @@ static int listen_events(int fd, const char *name, int seconds,int fam, unsigned
 		}
 		fd = lfd;
 		/* 订阅之后重新启动轮询，这样卡就在现场能被抓到 */
+		/* 同一个进程里先 DEV_UP 再 START_POLL，
+		 * 避免"另一个进程退出 → socket 关闭 → 内核停止轮询"。
+		 */
+		send_cmd(fd, fam, NFC_CMD_DEV_UP, idx);
 		start_poll(fd, fam, idx, 0x1f);
 	}
 
