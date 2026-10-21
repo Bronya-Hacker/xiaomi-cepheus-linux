@@ -880,3 +880,43 @@ fastboot flash recovery out/kernelfat.img         # 内核/模块
 - 继续查 DSP 核为什么不响应（需要看 HALO 引导的私有步骤/MCLK 需求）
 - 或者：**既然 MIUI 音频完全正常，把"小爱音箱"的软件直接做在 Android 上**
   （喇叭、麦克风、蓝牙都是现成的），比死磕主线音频更快见效
+
+---
+
+## 追加16：功放寄存器全绿，只剩 DSP 固件这一关（2026-10-21 20:05）
+
+播放中实测（`OKDBG`，48k/16bit/2ch，QUAT MI2S）：
+
+```
+S1=0x01400000  PUP_DONE          S3=0x2000002e  PLL_LOCK=1
+BST_VCTRL1=0x78 (8.5V)           PWR_CTRL2=0x20 (boost on)
+AMP_GAIN=0x280                   OUT_MUTE=0x0   ← 输出没被静音
+SP_EN=0x00010000                 ← ASPRX1 已使能
+SP_FORMAT=0x10180200             ← ASP_FMT=2(I2S)
+RX_WL=0x10 (16bit)               TX_WL=0x18
+PWR_CTRL3=0x01000010             DAC_PCM1_SRC=0x8 (ASP)
+```
+
+也就是说：**从 DSP 到功放的所有环节都是"正常"状态，但仍然没有声音**，
+而同一块硬件的 MIUI 能出声。
+
+### 唯一剩下的差异：保护 DSP 固件
+
+`cs35l41-dsp1-spk-prot.wmfw` 能被 cs_dsp 解析，但
+`regmap_raw_write(PM_PACKED, ..., 18280)` **返回 -110（超时）** —— 是 I2C 写本身超时，
+说明 DSP 内存窗口没在应答（DSP 核没跑起来）。
+
+已排除：
+- `cs35l41_dsp1_regions`、`otp_map_1/2`（99 条）、`pup/pdn_patch`：与原厂**完全一致**
+- regmap `max_register=0x03804FE8`：覆盖 DSP 窗口，不是被 regmap 拒绝
+
+怀疑：DSP 核需要**常驻 MCLK**（笔记本设计里平台一直给 12.288MHz；
+本板原厂 `sound-tavil` 的 pinctrl-0 只引用 `quat_mi2s_active/sd0/sd1`，**没有 mclk**），
+或需要原厂私有步骤（模块里有 `cs35l41_set_csplmboxcmd`，主线没有对应实现）。
+
+### 下一步（下次接着做）
+
+1. 打开 GPIO136 的 MCLK 输出（AFE `mclk_id` 已做成参数），再试加载 DSP 固件
+2. 反汇编原厂 `cs35l41_set_csplmboxcmd` / `cs35l41_dsp_load_ev`，复刻它的 HALO 引导顺序
+3. 若 DSP 固件始终加载不了，改用"纯 ASP 直连"路线，但要弄清功放为什么不放行
+   （可能内部需要有 DSP 的"保护已就绪"信号才解除静音）
