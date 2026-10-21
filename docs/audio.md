@@ -1195,3 +1195,35 @@ codec 的数字前端和 DAPM 全部就绪，但 **SLIMbus TX 端口没有真正
 - `slim_tx_ch_base = -1`（默认不覆盖）
 - `slim_skip_stream = 1`（默认跳过会阻塞的框架流准备）
 - 即使打开 `SLIM TX0` 也不会再卡死（链表 bug 已修）
+
+## 追加23：框架路径不再阻塞，端口寄存器回读正常，但仍是 0（2026-10-21 22:55）
+
+修掉链表破坏后，`slim_skip_stream=0`（走框架 `slim_stream_prepare/enable`）
+**不再阻塞**，说明之前的"卡死"完全是 `INIT_LIST_HEAD` 破坏链表造成的。
+
+codec 端口寄存器回读（`TXPORTDBG`）：
+
+```
+chs0=3 chs1=0 cfg=5 ch_cnt=2
+```
+
+`chs0=3` 表示端口的多通道 payload 里 bit0/bit1 已使能（2 个通道），
+`cfg=5` 是水位值 —— 说明**我们写进 codec 接口设备的端口配置确实生效了**。
+
+但录音样本依然全 0。已排除：
+
+- DAPM 全链路 On（SLIM TX0 / AIF1_CAP Mixer / AIF1 Capture / CDC_IF TX0 MUX
+  / ADC MUX0 / AMIC MUX0 / ADC1 / AMIC1 / MIC BIAS1）
+- AFE 侧通道 base 128（与 codec 一致）
+- codec 侧通道 base 0/1/2/4/8/128 全试
+- AMIC MUX0 四路全试、所有音量拉满
+- 走框架路径与跳过框架路径都试过，都不阻塞、都录到 0
+
+### 当前判断
+
+codec 端口"已使能"但没有采样流出来。剩下的可能性集中在
+**ADSP 侧没有真正给这个 SLIMbus 端口开数据通路**（原厂由 ADSP 全权掌管
+SLIMbus 的通道分配与端口激活），Linux 侧能做的配置已经做完。
+
+再往下需要：反汇编/跟踪 ADSP 侧音频拓扑，或找到 `q6afe` 里缺失的
+"SLIMbus device enable / port connect" 类命令，工作量和扬声器 DSP 那条线类似。
