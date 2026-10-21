@@ -1104,3 +1104,44 @@ arecord → 进程进入 D 状态（不可中断），kill -9 无效，
 3. 检查 `slim-ngd` 的 `slim_stream` debugfs / `SLIM SAT` 日志
 
 `slim_tx_ch_base` 默认已恢复 **-1**（不覆盖），避免再卡死系统。
+
+---
+
+## 追加21：采集卡死的真正位置 —— SLIMbus 寄存器访问被 ADSP 挡住（2026-10-21 22:20）
+
+### 定位过程
+
+r3.40 里加了 `slim_skip_stream=1`（跳过 `slim_stream_prepare/enable`），
+确认卡死**不在**框架的流准备，而在 codec 一侧：
+
+`dmesg` 最后一条是机器驱动的 `SLIMCHDBG capture ch_cnt=2 base=128`，
+之后**没有任何日志**（连我们退化路径的 `SLIMFB` 都没打印），
+说明卡在紧接着的 `wcd934x_slim_set_hw_params()` 里 —— 也就是那一串
+`regmap_write(wcd->if_regmap, WCD934X_SLIM_PGD_TX_PORT_*, ...)`。
+
+这些是**通过 SLIMbus 访问 codec 接口设备的寄存器**，在
+`qcom,slim-ngd`（卫星控制器，主控是 ADSP）上会**不可中断阻塞**
+（进程进 D 状态，连 `reboot` 都被挡住，只能长按电源）。
+
+### 结论
+
+- 只要打开 `SLIM TX0`（把 TX 端口登记进 `slim_ch_list`），
+  `ch_count` 就变成非 0，随后就会去写 codec 的 SLIM 端口寄存器 → 卡死
+- 不开 `SLIM TX0` 则 `ch_count=0`，不写寄存器 → 不卡，但录到全 0
+
+也就是说：**在 ADSP 掌管 SLIMbus 的这个平台上，Linux 侧无法编程 codec 的
+采集端口**。通道分配和端口配置本该由 ADSP 完成（原厂就是这么做的）。
+
+### 下一步方向（供以后）
+
+1. 不再由 Linux 配 codec 端口，改为让 **ADSP** 配置（需要 ADSP 侧的
+   "SLIMbus port mapping" 命令，主线的 q6afe SLIM 配置里没有这部分）
+2. 或者确认 ADSP 是否已把 codec 的 TX 端口配好、只是通道号与 AFE 不一致
+   （可在 AFE 侧改 `SLIMBUS_0_TX` 的 `ch_mapping` 去试）
+3. 若都不行，麦克风在主线短期内难通；可用 USB 麦克风替代
+
+### 安全默认值（已固化）
+
+- `slim_tx_ch_base = -1`（不覆盖通道）
+- `slim_skip_stream` 默认为 1（不调用会阻塞的框架流准备）
+- **注意：仍然不要在采集前打开 `SLIM TX0`**，否则会卡死系统
