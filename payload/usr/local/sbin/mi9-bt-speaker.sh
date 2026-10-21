@@ -1,45 +1,43 @@
 #!/bin/sh
-# mi9-bt-speaker —— 把系统音频输出接到蓝牙音箱（小爱音箱），并保持连接
+# mi9-bt-speaker —— 蓝牙音箱音频桥（自动连接 + 断线自愈 + 音频栈守护）
 #
-# 背景：这台机器的内部喇叭卡在 ADSP/DSP 层，能出数据但没有声音。
-# 蓝牙这条路完全绕开 ADSP：应用 -> PipeWire -> bluez5(A2DP) -> UART -> QCA 芯片 -> 音箱。
+# 背景：这台手机的内部喇叭/麦克风卡在 ADSP 固件层，出不了声。
+# 蓝牙这条路完全绕开 ADSP：
+#     应用 -> PipeWire -> bluez5(A2DP) -> hci_uart -> QCA wcn3990 -> 音箱
 #
-# 关键点（踩过的坑，全记在 docs/bluetooth.md）：
-#   1. root 没有登录会话：既没有 XDG_RUNTIME_DIR 也没有会话 D-Bus，
-#      PipeWire/WirePlumber 都起不来（"Cannot autolaunch D-Bus without X11 $DISPLAY"）。
-#      → 自己造 /run/user/0 和一条 unix:path=.../bus 的会话总线。
-#   2. 光有 bluez5 库不够，要装 libspa-0.2-bluetooth 才有 A2DP 端点
-#      （否则连接报 br-connection-profile-unavailable）。
-#   3. WirePlumber 默认空闲 5 秒挂起节点，A2DP transport 一挂起音箱就断开。
-#      → /etc/wireplumber/bluetooth.lua.d/51-no-suspend-bluez.lua 里设
-#        session.suspend-timeout-seconds = 0。
-#   4. 同时跑两个 wireplumber 会让蓝牙 profile 注册失败：
-#        sco_listen: listen(): Address already in use
-#        register_profile_reply: RegisterProfile() failed: org.bluez.Error.NotPermitted
-#      结果永远生成不出 A2DP sink。user@0 会话自带一套音频栈，所以这里
-#      **优先复用会话里那套**，实在没有才自己起，且起之前把残留的全部清掉。
-#   5. 拿 /dev/zero 当静音流保活行不通（sndfile 不认，进程立刻退出），
-#      真要保活就循环播 /usr/share/mi9/silence-60s.wav（BT_KEEPALIVE=1）。
+# 设计取舍（哪些是主流、哪些是不得已，写清楚便于以后替换）：
+#   ✅ 主流：单实例 PipeWire/WirePlumber/pipewire-pulse；BlueZ 信任设备；
+#            WirePlumber 里禁用蓝牙节点空闲挂起、开启 bluez5.auto-connect；
+#            BlueZ [Policy] 打开 ReconnectUUIDs 让链路超时后自动恢复。
+#   ⚠️ 不得已：root 无 logind 会话，必须自己造 XDG_RUNTIME_DIR 和会话 D-Bus。
+#   ⚠️ 不得已：BlueZ 的 ReconnectUUIDs 只处理"链路超时"，对"音箱自己关机再开"
+#            这类情况不会重连，所以需要一个监督者在需要时发起 Device1.Connect。
+#            这里用事件驱动（监听 BlueZ 信号）+ 30 秒慢兜底，而不是盲轮询。
+#   ⚠️ 保活流：本音箱空闲一段时间会自己断，因此常驻一路静音 WAV。
 #
 # 用法：
-#   mi9-bt-speaker start   守护循环（systemd 用这个）
-#   mi9-bt-speaker once    只连接一次并设为默认输出
-#   mi9-bt-speaker status  看状态
-#   mi9-bt-speaker stop    停止
+#   mi9-bt-speaker start    守护（systemd 用这个）
+#   mi9-bt-speaker once     连一次并设为默认输出
+#   mi9-bt-speaker status   状态
+#   mi9-bt-speaker stop     停止
+#   mi9-bt-speaker test     放一段测试音（有 /usr/share/mi9/tone.wav 就放它）
+#   mi9-bt-speaker volume N 设音量 0.0~1.0
 #
-# 配置（也可写进 /etc/mi9-bt-speaker.conf）：
-#   BT_MAC=40:31:3C:81:D6:DA   音箱 MAC
-#   BT_VOLUME=0.8              音量（1.0 = 100%）
-#   BT_KEEPALIVE=0             额外静音流保活（默认关，靠 no-suspend 规则）
+# 配置 /etc/mi9-bt-speaker.conf：
+#   BT_MAC=40:31:3C:81:D6:DA
+#   BT_VOLUME=0.9
+#   BT_KEEPALIVE=1
 
 set -u
 
 BT_MAC_DEFAULT="40:31:3C:81:D6:DA"	# 小爱音箱-3418
-BT_VOLUME_DEFAULT="0.8"
-BT_KEEPALIVE_DEFAULT="0"
+BT_VOLUME_DEFAULT="0.9"
+BT_KEEPALIVE_DEFAULT="1"
+FALLBACK_POLL=30			# 慢兜底间隔（秒）
 RUNTIME_DIR=/run/user/0
 KEEPALIVE_PID=/run/mi9-bt-keepalive.pid
 DAEMON_PID=/run/mi9-bt-speaker.pid
+SILENCE=/usr/share/mi9/silence-60s.wav
 
 [ -r /etc/mi9-bt-speaker.conf ] && . /etc/mi9-bt-speaker.conf
 BT_MAC="${BT_MAC:-$BT_MAC_DEFAULT}"
@@ -48,7 +46,6 @@ BT_KEEPALIVE="${BT_KEEPALIVE:-$BT_KEEPALIVE_DEFAULT}"
 
 log() { logger -t mi9-bt-speaker "$*"; echo "$*"; }
 
-# root 没有登录会话，得自己准备运行时目录 + 会话 D-Bus
 setup_runtime() {
 	mkdir -p "$RUNTIME_DIR"
 	chmod 700 "$RUNTIME_DIR"
@@ -70,19 +67,29 @@ setup_runtime() {
 	fi
 }
 
-# 音频栈可用才算数（wpctl 连得上）
+# 等蓝牙适配器就绪（开机时 bluetoothd 可能还没起来）
+wait_adapter() {
+	i=0
+	while [ $i -lt 30 ]; do
+		bluetoothctl list 2>/dev/null | grep -q 'Controller' && return 0
+		sleep 1; i=$((i + 1))
+	done
+	return 1
+}
+
+# 音频栈健康判据：连得上 + wireplumber 恰好一份 + pulse 兼容层在
+# （两个 wireplumber 会抢注册 A2DP profile，导致一连就断）
+stack_healthy() {
+	wpctl status >/dev/null 2>&1 || return 1
+	[ "$(pgrep -xc wireplumber 2>/dev/null || echo 0)" = "1" ] || return 1
+	[ "$(pgrep -xc pipewire-pulse 2>/dev/null || echo 0)" -ge 1 ] || return 1
+	return 0
+}
+
 ensure_audio_stack() {
-	npw=$(pgrep -xc pipewire 2>/dev/null || echo 0)
-	nwp=$(pgrep -xc wireplumber 2>/dev/null || echo 0)
-	npl=$(pgrep -xc pipewire-pulse 2>/dev/null || echo 0)
+	stack_healthy && return 0
 
-	# 正常状态：连得上、wireplumber 只有一份、pulse 兼容层在
-	if wpctl status >/dev/null 2>&1 && [ "$nwp" = "1" ] && [ "$npl" -ge 1 ]; then
-		return 0
-	fi
-
-	# 否则重建：先把会话单元和残留全部停掉，再各起一份
-	log "重建音频栈（pipewire=$npw wireplumber=$nwp pulse=$npl）"
+	log "重建音频栈（pipewire=$(pgrep -xc pipewire 2>/dev/null || echo 0) wireplumber=$(pgrep -xc wireplumber 2>/dev/null || echo 0) pulse=$(pgrep -xc pipewire-pulse 2>/dev/null || echo 0)）"
 	systemctl --user stop pipewire-pulse wireplumber pipewire pipewire.socket >/dev/null 2>&1
 	pkill -x pipewire-pulse 2>/dev/null
 	pkill -x wireplumber 2>/dev/null
@@ -94,17 +101,12 @@ ensure_audio_stack() {
 	sleep 1
 	nohup wireplumber    >/var/log/mi9-wireplumber.log    2>&1 &
 	sleep 3
-	return 0
-}
-bt_connected() {
-	bluetoothctl info "$BT_MAC" 2>/dev/null | grep -q "Connected: yes"
+	stack_healthy
 }
 
-bt_paired() {
-	bluetoothctl info "$BT_MAC" 2>/dev/null | grep -q "Paired: yes"
-}
+bt_connected() { bluetoothctl info "$BT_MAC" 2>/dev/null | grep -q "Connected: yes"; }
+bt_paired()    { bluetoothctl info "$BT_MAC" 2>/dev/null | grep -q "Paired: yes"; }
 
-# 找蓝牙 sink：输出 "<id> <node.name>"
 bt_sink_node() {
 	wpctl status 2>/dev/null |
 		sed -n '/Sinks:/,/Sources:/p' |
@@ -125,33 +127,27 @@ keepalive_running() {
 start_keepalive() {
 	node=$1
 	keepalive_running && return 0
-	[ -f /usr/share/mi9/silence-60s.wav ] || {
-		log "缺少 /usr/share/mi9/silence-60s.wav，跳过保活"
-		return 1
-	}
-	setsid sh -c "export XDG_RUNTIME_DIR=$RUNTIME_DIR; while :; do pw-play --target '$node' /usr/share/mi9/silence-60s.wav || sleep 1; done" \
+	[ -f "$SILENCE" ] || { log "缺少 $SILENCE，跳过保活"; return 1; }
+	setsid sh -c "export XDG_RUNTIME_DIR=$RUNTIME_DIR; while :; do pw-play --target '$node' '$SILENCE' || sleep 1; done" \
 		>/var/log/mi9-bt-keepalive.log 2>&1 &
 	echo $! > "$KEEPALIVE_PID"
-	log "静音保活流已启动 (pid $(cat "$KEEPALIVE_PID"))"
+	log "保活流已启动（pid $(cat "$KEEPALIVE_PID"))"
 }
 
 stop_keepalive() {
-	if keepalive_running; then
+	keepalive_running && {
 		kill -- -"$(cat "$KEEPALIVE_PID")" 2>/dev/null
-		log "静音保活流已停止"
-	fi
+		log "保活流已停止"
+	}
 	rm -f "$KEEPALIVE_PID"
 }
 
 connect_once() {
-	if ! bt_paired; then
-		log "音箱 $BT_MAC 还没配对（先 bluetoothctl pair $BT_MAC 配一次）"
-		return 1
-	fi
+	bt_paired || { log "音箱 $BT_MAC 未配对（先 bluetoothctl pair $BT_MAC）"; return 1; }
 	bt_connected && return 0
 	log "连接 $BT_MAC ..."
 	bluetoothctl connect "$BT_MAC" >/dev/null 2>&1
-	sleep 2
+	sleep 3
 	bt_connected
 }
 
@@ -160,64 +156,102 @@ apply_route() {
 	[ -n "$info" ] || return 1
 	id=${info%% *}
 	node=${info##* }
-	wpctl set-default "$id" 2>/dev/null
-	wpctl set-volume "$id" "$BT_VOLUME" 2>/dev/null
+	cur=$(wpctl inspect "$id" 2>/dev/null | grep -c 'default')
+	wpctl set-default "$id" >/dev/null 2>&1
+	wpctl set-volume "$id" "$BT_VOLUME" >/dev/null 2>&1
 	[ "$BT_KEEPALIVE" = "1" ] && start_keepalive "$node"
 	return 0
 }
 
-do_once() {
-	setup_runtime
-	ensure_audio_stack
+# 完整一步：健康检查 -> 连接 -> 路由
+step() {
+	ensure_audio_stack || return 1
 	connect_once || return 1
 	sleep 1
-	apply_route || { log "找不到蓝牙 sink"; return 1; }
-	log "已切换到蓝牙音箱输出"
-	return 0
+	apply_route
+}
+
+do_once() {
+	setup_runtime
+	wait_adapter
+	step && log "已切换到蓝牙音箱"
+}
+
+# 事件驱动：监听 BlueZ 的断开信号后立刻处理一次
+watch_events() {
+	busctl monitor --match "type='signal',interface='org.bluez.Device1'" org.bluez 2>/dev/null |
+	while read -r line; do
+		case "$line" in
+		*Disconnected*|*Powered*|*Connected*)
+			touch /run/mi9-bt-event
+			;;
+		esac
+	done
 }
 
 do_daemon() {
 	setup_runtime
 	echo $$ > "$DAEMON_PID"
-	log "守护启动，目标音箱 $BT_MAC"
+	log "守护启动：目标 $BT_MAC，兜底间隔 ${FALLBACK_POLL}s"
+
+	wait_adapter || log "警告：蓝牙适配器未就绪，继续等待"
+
+	[ -f /run/mi9-bt-event ] || : > /run/mi9-bt-event
+	( while :; do watch_events; sleep 3; done ) >/dev/null 2>&1 &
+
+	last=$(( $(date +%s) - FALLBACK_POLL ))
 	while :; do
-		ensure_audio_stack
-		if bt_connected; then
-			apply_route || true
-		else
-			stop_keepalive
-			connect_once || true
-			sleep 1
-			apply_route || true
+		now=$(date +%s)
+		evt=0
+		if [ /run/mi9-bt-event -nt /run/mi9-bt-event.seen ] 2>/dev/null; then
+			touch /run/mi9-bt-event.seen
+			evt=1
 		fi
-		sleep 5
+		if [ "$evt" = "1" ] || [ $((now - last)) -ge $FALLBACK_POLL ]; then
+			last=$now
+			bt_connected || stop_keepalive
+			step || true
+		fi
+		sleep 2
 	done
 }
 
 do_status() {
 	setup_runtime
-	printf '音箱 MAC   : %s\n' "$BT_MAC"
-	printf '已配对     : %s\n' "$(bt_paired && echo 是 || echo 否)"
-	printf '已连接     : %s\n' "$(bt_connected && echo 是 || echo 否)"
-	printf '音频栈     : %s\n' "$(wpctl status >/dev/null 2>&1 && echo 正常 || echo 未运行)"
-	printf 'wireplumber: %s 个进程\n' "$(pgrep -c -x wireplumber 2>/dev/null || echo 0)"
-	printf '保活流     : %s\n' "$(keepalive_running && echo 运行中 || echo '未启用/未运行')"
-	printf '守护进程   : %s\n' "$([ -f "$DAEMON_PID" ] && kill -0 "$(cat "$DAEMON_PID" 2>/dev/null)" 2>/dev/null && echo 运行中 || echo 未运行)"
-	echo "--- 当前输出设备 ---"
+	printf '音箱 MAC    : %s\n' "$BT_MAC"
+	printf '已配对      : %s\n' "$(bt_paired && echo 是 || echo 否)"
+	printf '已连接      : %s\n' "$(bt_connected && echo 是 || echo 否)"
+	printf '音频栈      : %s\n' "$(stack_healthy && echo 健康 || echo 异常)"
+	printf '  进程      : pipewire=%s wireplumber=%s pulse=%s\n' \
+		"$(pgrep -xc pipewire 2>/dev/null || echo 0)" \
+		"$(pgrep -xc wireplumber 2>/dev/null || echo 0)" \
+		"$(pgrep -xc pipewire-pulse 2>/dev/null || echo 0)"
+	printf '保活流      : %s\n' "$(keepalive_running && echo 运行中 || echo 未运行)"
+	printf '守护进程    : %s\n' "$([ -f "$DAEMON_PID" ] && kill -0 "$(cat "$DAEMON_PID" 2>/dev/null)" 2>/dev/null && echo 运行中 || echo 未运行)"
+	echo '--- 输出设备 ---'
 	wpctl status 2>/dev/null | sed -n '/Sinks:/,/Sources:/p' | head -n 6
+}
+
+do_test() {
+	setup_runtime
+	node=$(bt_sink_node)
+	[ -n "$node" ] || { log "没有蓝牙 sink，先 once"; return 1; }
+	node=${node##* }
+	[ -f /usr/share/mi9/tone.wav ] && f=/usr/share/mi9/tone.wav || f="$SILENCE"
+	log "播放 $f"
+	pw-play --target "$node" "$f"
 }
 
 case "${1:-status}" in
 start|daemon) do_daemon ;;
 once) do_once ;;
 status) do_status ;;
+test) do_test ;;
+volume) BT_VOLUME="${2:-0.9}"; setup_runtime; id=$(bt_sink_node); [ -n "$id" ] && wpctl set-volume ${id%% *} "$BT_VOLUME" && echo "音量设为 $BT_VOLUME" ;;
 stop)
 	[ -f "$DAEMON_PID" ] && kill "$(cat "$DAEMON_PID")" 2>/dev/null && rm -f "$DAEMON_PID"
 	stop_keepalive
 	log "已停止"
 	;;
-*)
-	echo "用法: mi9-bt-speaker [start|once|status|stop]"
-	exit 1
-	;;
+*) echo "用法: mi9-bt-speaker [start|once|status|test|volume N|stop]" ;;
 esac

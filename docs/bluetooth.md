@@ -219,3 +219,76 @@ BT_KEEPALIVE=1     # 强烈建议开：播放间隙不会断
 ```sh
 mpg123 -o pulse /path/to/music.mp3
 ```
+
+---
+
+## 追加：v2 设计 —— 哪些是主流、哪些是不得已（2026-10-22 02:45）
+
+### 先回答一个关键问题：纯主流机制够不够？
+
+**不够。** 实测：
+
+| 机制 | 作用范围 | 我们需要的场景 |
+|---|---|---|
+| BlueZ `[Policy] ReconnectUUIDs` | 只在**链路超时**（link supervision timeout）时重连 | 音箱自己关机再开、被别的设备抢走 → **不触发** |
+| WirePlumber `bluez5.auto-connect` | 主要在**监视器启动时**对已在范围/已连接的设备建立 profile | 运行期掉线 → **不覆盖** |
+| BlueZ `AutoEnable=true` | 只负责开适配器 | 与设备连接无关 |
+
+实测：手动 `disconnect` 之后，上面三条**都不会**把音箱连回来（观察 60 秒无动作）。
+所以要有一个"监督者"在需要时发起 `Device1.Connect`。
+
+### v2 的做法：事件驱动 + 慢兜底（不是盲轮询）
+
+```
+busctl monitor --match "type='signal',interface='org.bluez.Device1'" org.bluez
+        ↓ 收到 Connected/Disconnected/Powered 信号
+        立刻触发一次 健康检查 -> 连接 -> 设置默认输出
+        ↓ 另外每 30 秒兜底一次（防止漏信号）
+```
+
+实测：手动断开后 **6 秒**自动恢复（v1 的 5 秒盲轮询是每 5 秒无脑调一次
+`bluetoothctl connect`，既吵又慢）。
+
+### 各项措施的性质对照
+
+| 措施 | 性质 | 说明 |
+|---|---|---|
+| 单实例 `pipewire`/`wireplumber`/`pipewire-pulse` | ✅ **主流正确做法** | 多份会抢注册 A2DP profile |
+| `session.suspend-timeout-seconds = 0` | ✅ 主流配置 | 避免空闲挂起断开 transport |
+| `bluez5.auto-connect` + BlueZ `ReconnectUUIDs` | ✅ 主流配置 | 覆盖"启动时"和"链路超时"两种情况 |
+| 事件驱动监督 + 30s 兜底 | ⚠️ 必要的补充 | 覆盖"设备自己关机/被抢占" |
+| 手工造 `XDG_RUNTIME_DIR` + 会话 D-Bus | ⚠️ 环境所迫 | root 无 logind 会话；正常桌面自动有 |
+| 静音 WAV 保活流 | ⚠️ 打补丁 | 本音箱空闲会自己断；正常 A2DP 不需要 |
+
+### 依赖的软件包（重新装机要装）
+
+```sh
+apt-get install -y pipewire pipewire-pulse wireplumber \
+                   libspa-0.2-bluetooth mpg123
+```
+
+- `libspa-0.2-bluetooth`：**没有它就没有 A2DP 端点**（连接报 br-connection-profile-unavailable）
+- `pipewire`/`pipewire-pulse`/`wireplumber`：rootfs 原本只有库，没有守护进程
+- `mpg123`：放 mp3 用（或任意走 PulseAudio 接口的播放器）
+
+### 命令
+
+```sh
+mi9-bt-speaker status        # 状态（含音频栈进程数、保活流）
+mi9-bt-speaker once          # 连一次并设为默认输出
+mi9-bt-speaker test          # 放测试音
+mi9-bt-speaker volume 0.9    # 设音量
+mpg123 -o pulse 音乐.mp3      # 放音乐
+```
+
+### 配置项固化位置（重刷不丢）
+
+```
+payload/usr/local/sbin/mi9-bt-speaker.sh          v2 主脚本
+payload/etc/systemd/system/mi9-bt-speaker.service 开机自启（已 enable）
+payload/etc/mi9-bt-speaker.conf                    MAC/音量/保活开关
+payload/etc/wireplumber/bluetooth.lua.d/51-no-suspend-bluez.lua
+payload/etc/wireplumber/bluetooth.lua.d/52-autoconnect-a2dp.lua
+payload/etc/bluetooth/main.conf                    ReconnectUUIDs/Attempts/Intervals
+payload/usr/share/mi9/silence-60s.wav              保活流音源（11MB→gzip 11KB）
+```
