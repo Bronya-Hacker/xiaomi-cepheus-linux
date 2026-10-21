@@ -218,3 +218,64 @@ TX_PATH_CFG0/SEC1 全量扫描、厂商默认值表（可映射部分）。
 
 **下一步**：结合分页机制重新审视 ANA 区写入，并考虑直接移植厂商的
 `tavil_codec_reg_defaults[]` + `tavil_codec_reg_init_*` 整套初始化。
+
+---
+
+## 第五轮：移植厂商整套初始化表（仍为 0，05:15）
+
+### 做了什么
+
+从厂商源码自动提取三张初始化表并生成为 C 数组，插入主线驱动：
+
+| 表 | 条目 |
+|---|---|
+| `tavil_codec_reg_defaults` | 36（可映射 33） |
+| `tavil_codec_reg_init_1_1_val` | 6 |
+| `tavil_codec_reg_init_common_val` | 28 |
+
+合计 **70 条** `{reg, mask, val}`，在 `wcd934x_init_dmic()` 之前用
+`snd_soc_component_update_bits()` 逐条应用。
+
+实测开机日志：
+
+```
+wcd934x-codec wcd934x-codec.1.auto: VENDORINIT applied 70 registers
+```
+
+### 结果：录音仍为精确 0
+
+### 至此已排除（全部实测）
+
+| 项目 | 状态 |
+|---|---|
+| SLIM TX 数字通路 | ✅ 环回可出数据，频率精确 1000Hz |
+| MCLK 供电 | ✅ On（修复了本来完全没上电） |
+| MCLK 频率 | ✅ 9.6MHz（修复了原来快一倍） |
+| 内部 PLL | ✅ 已按厂商值配置 + 使能，STATUS=0xdf |
+| 厂商初始化表 | ✅ 70 条全部应用 |
+| ADC 使能位 / tx_hold | ✅ 手动补上验证过 |
+| 偏置接线与电压 | ✅ AMIC3←BIAS3，1.8V |
+| 音量 / 静音位 | ✅ 非静音，最大增益 |
+| AMIC1-4 / DMIC0-5 | ✅ 全部试过 |
+| TX_PATH_CFG0 / SEC1 全量扫描 | ✅ 无命中 |
+
+### 结论
+
+**软件层面已无计可施。** 剩下三条路：
+
+1. **移植 CPE/MAD 子系统**：厂商 DT 有 `qcom,wcd-dsp-mgr` +
+   `qcom,img-filename = "cpe_9340"` 固件，主线完全没有。若 ADC 依赖 CPE 时钟域，
+   这是唯一剩下的软件路。
+2. **硬件确认**：用示波器/万用表确认麦克风是否真的接在 AMIC3 上、
+   偏置电压是否真的出现在 mic 供电脚。
+3. **实用替代**：USB 声卡麦克风，或蓝牙耳机麦（HFP，完全绕开 codec ADC）。
+
+### 本轮的实际价值
+
+即使麦克风没通，这一轮修的问题都是真的：
+- MCLK 从未上电 → 所有采集类操作必然失败
+- MCLK 频率错一倍 → 所有 codec 时序错误（环回已验证修复）
+- 厂商初始化表 70 条（带隙基准、CPR、CLSH、BOOST、TX_PATH_CFG1）
+  → codec 的模拟部分现在才真正按厂商方式初始化
+
+对后续做内部喇叭（CS35L41）、耳机输出、通话通路都有直接帮助。
