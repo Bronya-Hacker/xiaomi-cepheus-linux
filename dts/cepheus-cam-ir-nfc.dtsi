@@ -198,6 +198,8 @@
 
 &i2c9 {
 	status = "okay";
+	/* SN100U 上电初期先用 100kHz，排除高速率导致的不响应 */
+	clock-frequency = <100000>;
 
 	nfc: nq@28 {
 		compatible = "nxp,nxp-nci-i2c";

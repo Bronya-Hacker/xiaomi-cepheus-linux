@@ -133,3 +133,39 @@ dmesg 里没有 `nfc_clk enabled`，`/sys/kernel/debug/clk/` 里也没有 `div_c
 要真正确定 NFC 的时钟来源，最直接是：
 - 有示波器量芯片的 CLK 脚；或
 - 从 vendor 内核模块/ADSP 配置里找 NFC 时钟的使能路径。
+
+---
+
+## 追加：100kHz / 上电时序 / 读行为全面排查（2026-10-22 01:05）
+
+| 试验 | 结果 |
+|---|---|
+| i2c 降到 **100kHz** | 仍读回全 0（速率不是原因） |
+| 确认总线对应关系 | `i2c-1 = a84000.i2c` ✅ 就是 i2c9，没搞错总线 |
+| EN 低→高 + 静置 0.5/1/2/4/8s | 读都成功但**恒为 0x00** |
+| 连发 CORE_RESET ×4 后连读 10 次 | 全 0x00 |
+| 写操作 | 一直"成功"（I2C 无错误） |
+
+### 关键观察
+
+读操作**不报错**、但数据恒为 `0x00`。正常 NCI 芯片"无数据"时应该是 NAK 或 0xFF。
+恒 0 说明 **MISO 被拉低 / 芯片核心在跑但无输出**。
+
+最可能的解释：**芯片的 VBAT 主供电没上**（只有 VEN 控制的 IO 电在），
+所以 I2C 从机地址能应答，但 NCI 核不运行。
+
+vendor DT 的 NFC 节点**没有任何 supply 属性**，说明这路电由 bootloader 或
+vendor 内核别处控制；主线里我们没找到对应 regulator。
+
+### 结论
+
+纯软件层面已无手段。需要：
+1. 原理图/PCB 点测 NFC 的 VBAT、CLK、VEN、FIRM 四条线；或
+2. 小米内核源码里 NFC 的供电/时钟初始化代码。
+
+### 当前状态（保留的改动）
+
+- `&i2c9 { clock-frequency = <100000>; }`（无害，保留）
+- NFC 节点：`clocks = <&rpmhcc RPMH_LN_BB_CLK3>`、`nfc_clk`
+- 驱动：`nxp-nci-i2c` 支持可选 `nfc_clk`
+- 工具：`tools/nfc-poll-netlink.c`、`tools/nci-script.c`
