@@ -222,7 +222,9 @@ static int start_poll(int fd, int fam, unsigned int idx, unsigned int protos)
 	return 0;
 }
 /* 订阅 nfc 多播组，打印内核推上来的事件（找卡、丢卡等） */
-static int listen_events(int fd, const char *name, int seconds)
+static int start_poll(int fd, int fam, unsigned int idx, unsigned int protos);
+
+static int listen_events(int fd, const char *name, int seconds,int fam, unsigned int idx)
 {
 	struct sockaddr_nl addr;
 	struct {
@@ -310,6 +312,8 @@ static int listen_events(int fd, const char *name, int seconds)
 			return -1;
 		}
 		fd = lfd;
+		/* 订阅之后重新启动轮询，这样卡就在现场能被抓到 */
+		start_poll(fd, fam, idx, 0x1f);
 	}
 
 	printf("开始监听 NFC 事件 %d 秒（请把卡贴到手机背面）...\n", seconds);
@@ -337,8 +341,22 @@ static int listen_events(int fd, const char *name, int seconds)
 								GENL_HDRLEN);
 					     NLA_OK(a, alen);
 					     a = NLA_NEXT(a, alen))
-						printf("    attr type=%d len=%d\n",
-						       a->nla_type, a->nla_len);
+						{
+							int k, pl = a->nla_len - NLA_HDRLEN;
+							unsigned char *pd = (unsigned char *)a + NLA_HDRLEN;
+							int off = 0;
+
+							printf("    attr type=%d len=%d data:",
+							       a->nla_type, pl);
+							while (off < pl) {
+								int w = (pl - off > 32) ? 32 : pl - off;
+
+								for (k = 0; k < w; k++)
+									printf(" %02x", pd[off + k]);
+								off += w;
+							}
+							printf("\n");
+						}
 				}
 			}
 		}
@@ -358,6 +376,8 @@ int main(int argc, char **argv)
 	if (argc > 2)
 		idx = atoi(argv[2]);
 
+	setvbuf(stdout, NULL, _IONBF, 0);
+
 	fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_GENERIC);
 	if (fd < 0) {
 		perror("socket");
@@ -371,7 +391,7 @@ int main(int argc, char **argv)
 	}
 
 	if (!strcmp(argv[1], "listen")) {
-		listen_events(fd, "nfc", 30);
+		listen_events(fd, "nfc", 30, fam, idx);
 	} else if (!strcmp(argv[1], "poll")) {
 		start_poll(fd, fam, idx, 0x1f);
 	} else if (!strcmp(argv[1], "up")) {

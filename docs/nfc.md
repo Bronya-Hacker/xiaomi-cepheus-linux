@@ -423,3 +423,47 @@ EN=1 → 10ms → EN=0 → 10ms → EN=1 → 10ms
 
 实测：`内核确认成功` → `轮询已启动` → 监听正常绑定（组 9），
 但还没抓到实际找卡事件（需要贴卡验证）。
+
+---
+
+# ★★★★ 实卡验证成功（2026-10-22 07:50）
+
+贴卡实测，两次都收到了内核事件：
+
+```
+$ ./nfc-devup listen
+找到多播组 id=9
+轮询已启动
+开始监听 NFC 事件 30 秒...
+>>> NFC 事件 cmd=9 len=28          ← NFC_CMD_TARGET_FOUND
+    attr type=1 len=4 data: 00 00 00 00
+```
+
+`NFC_CMD_TARGET_FOUND = 9`，说明：
+
+- 芯片上电、NCI 初始化完成
+- RF 轮询在跑，射频场已开启
+- **实际检测到卡片**，内核 NFC 栈收到并广播了事件
+
+至此小米9（cepheus）在主线 Linux 上的 NFC 从
+「完全没反应、读回全 0」到「能初始化、能轮询、能识别卡片」全部打通。
+
+## 使用方式
+
+```sh
+/root/nfc-devup up 0      # 上电 + NCI 初始化（每次开机第一次有效）
+/root/nfc-devup poll 0    # 启动 RF 轮询
+/root/nfc-devup listen    # 订阅事件（会自动重启轮询，便于现场抓卡）
+```
+
+贴卡后 `listen` 会打印 `cmd=9`（TARGET_FOUND）。
+
+## 遗留
+
+1. **每次开机只能初始化一次**：`DEV_DOWN` 后再 `DEV_UP` 仍超时。
+   芯片需要在两次之间做完整掉电（可能要在 set_mode 里拉长 ULPM 时间，
+   或在 DOWN 时把 EN 拉到低电平并等待）。
+2. 事件里没有 target 详情（UID/协议）—— 主线 `nfc_targets_found()` 只发
+   设备索引，不携带 target 属性。要读卡号需要走 LLCP/raw 通路
+   （用 libnfc 或直接发 RF 命令）。
+3. 还没做成开机自启服务 + 应用层读卡工具。
