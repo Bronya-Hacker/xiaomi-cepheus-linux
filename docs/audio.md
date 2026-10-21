@@ -1509,3 +1509,98 @@ dec0 AMIC 34 54 b4 54 BIAS 80 INP 33/01 CTL 24 CFG0 50 CFG1 03 VOL 0f SEC2 01
 2. 用 `dbg_writes` 把 AMIC1-4 的所有"可疑位"组合扫一遍（现在 MCLK 已通，
    之前的扫描都是在没时钟的情况下做的，**需要重扫**）
 3. 若仍不行 → codec ADC 可能依赖 CPE/MAD 子系统初始化，或该用 USB/蓝牙麦
+
+---
+
+## 追加29：★★ 又修掉两个真实的时钟 bug（2026-10-22 05:45）
+
+### bug 1：采集时 MCLK 完全没有上电
+
+DAPM 检查发现录音时 `MCLK: Off`。它的 widget 事件正是
+`clk_prepare_enable(wcd->extclk)` 的调用点 —— 没时钟，ADC/DEC 必然输出硬 0。
+
+原因：板级 routing 里 MCLK 只接了播放侧（`RX_BIAS`）和 `DMIC0/2`，
+**AMIC→ADC 的采集链路完全没有拉 MCLK**。
+
+修复：
+
+```dts
+"AMIC1", "MCLK", "AMIC3", "MCLK", "AMIC4", "MCLK",
+"DMIC1", "MCLK", "DMIC3", "MCLK", "DMIC4", "MCLK", "DMIC5", "MCLK",
+```
+
+修复后 `MCLK: On`。
+
+### bug 2：MCLK 频率差 2 倍
+
+原厂 DT 里 codec 的时钟不是直接接 RPMH：
+
+```
+audio_ext_clk_lnbb {
+    compatible = "qcom,audio-ref-clk";
+    qcom,codec-ext-clk-src = <1>;    /* 分频选择 */
+    clocks = <&rpmhcc 0x02>;         /* LN_BB_CLK2 = 19.2MHz */
+};
+```
+
+`qcom,audio-ref-clk` 这个驱动把它**二分频成 9.6MHz** 给 codec
+（原厂 `qcom,tavil-mclk-clk-freq = <0x927c00>` = 9.6MHz）。
+
+**主线没有这个驱动**，我们的 DT 是：
+
+```dts
+clocks = <&rpmhcc RPMH_LN_BB_CLK2>;   /* 实际 19.2MHz */
+clock-frequency = <9600000>;          /* 但驱动以为 9.6MHz */
+```
+
+驱动按 9.6MHz 算分频，实际却是 19.2MHz —— **所有时钟分频都错了一倍**。
+
+修复：用标准 `fixed-factor-clock` 二分频：
+
+```dts
+&{/} {
+	audio_ref_clk: audio-ref-clk {
+		compatible = "fixed-factor-clock";
+		clocks = <&rpmhcc RPMH_LN_BB_CLK2>;
+		#clock-cells = <0>;
+		clock-div = <2>;
+		clock-mult = <1>;
+		clock-output-names = "audio_ref_clk";
+	};
+};
+```
+
+codec 改为 `clocks = <&audio_ref_clk>;`。
+
+实测：采集时 `audio_ref_clk rate=9600000 enable=1` ✅（真的 9.6MHz 且已使能）
+
+### 修完仍然为 0
+
+至此已确认全部正确：
+
+| 项目 | 状态 |
+|---|---|
+| MCLK 频率 | ✅ 9.6MHz（fixed-factor 二分频） |
+| MCLK 使能 | ✅ enable=1 |
+| ADC 使能位（AMIC3 bit7） | ✅ 手动补上 |
+| tx_hold | ✅ |
+| 偏置接线（AMIC3←BIAS3） | ✅ |
+| 偏置电压（DT 1.8V） | ✅ |
+| 音量/静音 | ✅ 0x0f 非静音 |
+| 输入 mux | ✅ ADC3 / DMIC0-5 |
+| **ADC/DEC 输出** | ❌ **仍为精确 0** |
+
+### 结论
+
+时钟、电源、路由、增益、静音、mux 全部验证正确，ADC 仍输出硬 0。
+这说明模拟前端本身没有工作，剩下的可能：
+
+1. codec 的 CPE/MAD 子系统需要初始化（原厂有 `qcom,wcd-dsp-mgr` + `cpe_9340` 固件）
+2. CLSH（class-H）或内部电荷泵需要厂商特定序列
+3. 该板的麦克风可能不在这颗 codec 上（虽然原厂 routing 这么写）
+
+### 实测价值
+
+这两个 bug 都是**真实且必须修的**（任何走 codec 的录音/放音都受影响），
+尤其 bug 2 会让整个 codec 的采样率偏差一倍 —— 即使麦克风暂时还是 0，
+这两处修复对后续（比如内部喇叭 CS35L41 通路）也有意义。

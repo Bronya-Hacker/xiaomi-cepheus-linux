@@ -196,6 +196,23 @@
 	status = "okay";
 };
 
+/* RPMH 的 LN_BB_CLK2 固定 19.2MHz，而 WCD9340 需要 9.6MHz。
+ * 原厂用 qcom,audio-ref-clk 驱动二分频，主线没这个驱动，
+ * 我们一直把 19.2MHz 直接给 codec、驱动却按 9.6MHz 算分频，
+ * 时钟差 2 倍 —— 这是 ADC/DEC 无法工作的直接原因。
+ * 用标准 fixed-factor-clock 实现二分频。
+ */
+&{/} {
+	audio_ref_clk: audio-ref-clk {
+		compatible = "fixed-factor-clock";
+		clocks = <&rpmhcc RPMH_LN_BB_CLK2>;
+		#clock-cells = <0>;
+		clock-div = <2>;
+		clock-mult = <1>;
+		clock-output-names = "audio_ref_clk";
+	};
+};
+
 &i2c9 {
 	status = "okay";
 	/* SN100U �ϵ�������� 100kHz���ų������ʵ��µĲ���Ӧ */
@@ -273,7 +290,7 @@
 			reset-gpios = <&tlmm 143 GPIO_ACTIVE_HIGH>;
 
 			clock-names = "extclk";
-			clocks = <&rpmhcc RPMH_LN_BB_CLK2>;
+			clocks = <&audio_ref_clk>;
 			#clock-cells = <0>;
 			clock-frequency = <9600000>;
 			clock-output-names = "mclk";
