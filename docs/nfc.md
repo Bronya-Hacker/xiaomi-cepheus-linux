@@ -399,3 +399,27 @@ EN=1 → 10ms → EN=0 → 10ms → EN=1 → 10ms
 - **每次开机只能初始化一次**：DEV_DOWN 之后再 UP 仍会超时
   （芯片需要在两次之间做完整掉电，可能要 CNTRL 时序调整）
 - 还没验证实际读卡（需要监听 `NFC_CMD_TARGET_FOUND` 事件，或装 libnfc）
+
+### 工具完善：监听找卡事件
+
+`tools/nfc-devup.c` 现在支持：
+
+```
+./nfc-devup up 0      # 上电 + NCI 初始化（每次开机第一次有效）
+./nfc-devup poll 0    # 启动 RF 轮询
+./nfc-devup listen    # 订阅 nfc 多播组，打印内核推来的事件
+```
+
+要点：
+
+- `NFC_ATTR_RF_MODE` 必须是 **u8**，否则内核报
+  `attribute type 11 has an invalid length`
+- nfc 多播组 id 是 **9**（不是 1），要解析 `CTRL_ATTR_MCAST_GROUPS`
+  嵌套属性拿 `CTRL_ATTR_MCAST_GRP_ID`；`nl_groups` 要设 `1 << (id-1)`
+- **必须用一个独立的 socket 订阅**：已经 `sendto` 过的 socket 再 `bind`
+  会返回 `EINVAL`
+- `/sys/kernel/debug/dynamic_debug/control` 没编进内核，所以开不了
+  nci/nxp_nci 的动态调试，找卡只能靠 netlink 事件
+
+实测：`内核确认成功` → `轮询已启动` → 监听正常绑定（组 9），
+但还没抓到实际找卡事件（需要贴卡验证）。

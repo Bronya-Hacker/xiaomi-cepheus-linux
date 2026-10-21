@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <poll.h>
 #include <errno.h>
 #include <sys/socket.h>
 #include <linux/netlink.h>
@@ -220,6 +221,131 @@ static int start_poll(int fd, int fam, unsigned int idx, unsigned int protos)
 	}
 	return 0;
 }
+/* 订阅 nfc 多播组，打印内核推上来的事件（找卡、丢卡等） */
+static int listen_events(int fd, const char *name, int seconds)
+{
+	struct sockaddr_nl addr;
+	struct {
+		struct nlmsghdr n;
+		struct genlmsghdr g;
+		char buf[128];
+	} req;
+	struct nlattr *na;
+	char resp[8192];
+	int len, group = -1, i;
+
+	memset(&addr, 0, sizeof(addr));
+	addr.nl_family = AF_NETLINK;
+
+	memset(&req, 0, sizeof(req));
+	req.n.nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
+	req.n.nlmsg_type = GENL_ID_CTRL;
+	req.n.nlmsg_flags = NLM_F_REQUEST;
+	req.n.nlmsg_seq = 7;
+	req.g.cmd = CTRL_CMD_GETFAMILY;
+	req.g.version = 1;
+
+	na = (struct nlattr *)((char *)&req + req.n.nlmsg_len);
+	na->nla_type = CTRL_ATTR_FAMILY_NAME;
+	na->nla_len = NLA_HDRLEN + strlen(name) + 1;
+	strcpy((char *)na + NLA_HDRLEN, name);
+	req.n.nlmsg_len += NLA_ALIGN(na->nla_len);
+
+	if (sendto(fd, &req, req.n.nlmsg_len, 0,
+		   (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+		perror("sendto groups");
+		return -1;
+	}
+	len = recv(fd, resp, sizeof(resp), 0);
+	if (len > 0) {
+		struct nlmsghdr *nh = (struct nlmsghdr *)resp;
+		struct genlmsghdr *gh = (struct genlmsghdr *)NLMSG_DATA(nh);
+		struct nlattr *a;
+		int alen = nh->nlmsg_len - NLMSG_LENGTH(GENL_HDRLEN);
+
+		for (a = (struct nlattr *)((char *)gh + GENL_HDRLEN);
+		     NLA_OK(a, alen); a = NLA_NEXT(a, alen)) {
+			if (a->nla_type == CTRL_ATTR_MCAST_GROUPS) {
+				/* 嵌套结构：每个子属性是一个组，
+				 * 里面有 GRP_NAME 和 GRP_ID。
+				 */
+				struct nlattr *g;
+				int glen = a->nla_len - NLA_HDRLEN;
+
+				for (g = (struct nlattr *)((char *)a + NLA_HDRLEN);
+				     NLA_OK(g, glen); g = NLA_NEXT(g, glen)) {
+					struct nlattr *x;
+					int xlen = g->nla_len - NLA_HDRLEN;
+
+					for (x = (struct nlattr *)((char *)g + NLA_HDRLEN);
+					     NLA_OK(x, xlen); x = NLA_NEXT(x, xlen)) {
+						if (x->nla_type == CTRL_ATTR_MCAST_GRP_ID) {
+							group = *(unsigned int *)((char *)x + NLA_HDRLEN);
+							printf("找到多播组 id=%d\n", group);
+						}
+					}
+					if (group > 0)
+						break;
+				}
+				break;
+			}
+		}
+	}
+
+	/* 已 sendto 过的 socket 不能再 bind，单独开一个订阅用 */
+	{
+		struct sockaddr_nl sa;
+		int lfd;
+
+		lfd = socket(AF_NETLINK, SOCK_RAW, NETLINK_GENERIC);
+		if (lfd < 0) {
+			perror("socket listen");
+			return -1;
+		}
+		memset(&sa, 0, sizeof(sa));
+		sa.nl_family = AF_NETLINK;
+		sa.nl_groups = (group > 0) ? (1u << (group - 1)) : 1u;
+		if (bind(lfd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
+			perror("bind group");
+			return -1;
+		}
+		fd = lfd;
+	}
+
+	printf("开始监听 NFC 事件 %d 秒（请把卡贴到手机背面）...\n", seconds);
+	for (i = 0; i < seconds * 5; i++) {
+		struct pollfd pfd = { .fd = fd, .events = POLLIN };
+		int pr = poll(&pfd, 1, 200);
+
+		if (pr > 0 && (pfd.revents & POLLIN)) {
+			len = recv(fd, resp, sizeof(resp), 0);
+			if (len > 0) {
+				struct nlmsghdr *nh = (struct nlmsghdr *)resp;
+				struct genlmsghdr *gh;
+
+				if (nh->nlmsg_type == NLMSG_ERROR)
+					continue;
+				gh = (struct genlmsghdr *)NLMSG_DATA(nh);
+				printf(">>> NFC 事件 cmd=%d len=%d\n",
+				       gh->cmd, nh->nlmsg_len);
+				{
+					struct nlattr *a;
+					int alen = nh->nlmsg_len -
+						   NLMSG_LENGTH(GENL_HDRLEN);
+
+					for (a = (struct nlattr *)((char *)gh +
+								GENL_HDRLEN);
+					     NLA_OK(a, alen);
+					     a = NLA_NEXT(a, alen))
+						printf("    attr type=%d len=%d\n",
+						       a->nla_type, a->nla_len);
+				}
+			}
+		}
+	}
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	int fd, fam;
@@ -244,7 +370,9 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	if (!strcmp(argv[1], "poll")) {
+	if (!strcmp(argv[1], "listen")) {
+		listen_events(fd, "nfc", 30);
+	} else if (!strcmp(argv[1], "poll")) {
 		start_poll(fd, fam, idx, 0x1f);
 	} else if (!strcmp(argv[1], "up")) {
 		if (send_cmd(fd, fam, NFC_CMD_DEV_UP, idx) == 0)
