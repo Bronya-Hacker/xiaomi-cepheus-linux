@@ -1275,3 +1275,96 @@ Linux 侧（DAPM、寄存器、通道、供电、格式）全部就绪且可验�
   是很好的备用通道。
 - DT 里新增的 `slimcap2/3-dai-link`（SLIMBUS_1_TX / 2_TX）暂时保留，
   以后查 ADSP 端口映射时还用得上。
+
+---
+
+## 追加26：★ 决定性实验证明 SLIM TX 通路是好的（2026-10-22 04:00）
+
+### 实验：codec 内部数字环回
+
+把 `CDC_IF TX0 MUX` 从 `DEC0` 改成 `RX_MIX_TX0`（绕过 ADC/DEC，
+直接取播放混音），然后**一边播放 1kHz 正弦一边采集**：
+
+```sh
+amixer cset name='SLIMBUS_0_RX Audio Mixer MultiMedia1' 1
+amixer cset name='SLIM RX0 MUX' AIF1_PB
+amixer cset name='CDC_IF TX0 MUX' RX_MIX_TX0
+amixer cset name='AIF1_CAP Mixer SLIM TX0' 1
+amixer cset name='MultiMedia2 Mixer SLIMBUS_0_TX' 1
+
+aplay -D hw:0,0 tone.wav &          # 幅度 18000
+arecord -D hw:0,1 -f S16_LE -r 48000 -c 1  # 同时采集
+```
+
+**结果：samples=192000, nonzero=184000, peak=18000 —— 采到的就是刚才播放的音。**
+
+### 这说明什么（推翻之前"ADSP 不开数据通路"的判断）
+
+| 环节 | 结论 |
+|---|---|
+| codec SLIM TX 端口 → ADSP → ALSA 采集 | ✅ **完全正常** |
+| ADSP 的 SLIMbus 数据通路 | ✅ **是开着的** |
+| 播放进 codec（SLIM RX → AIF1_PB） | ✅ 正常 |
+| **ADC/DEC（模拟麦 → 数字）** | ❌ **输出恒为 0** |
+
+所以真正的卡点在 **codec 的 ADC/DEC 这一级**，不是 SLIMbus、也不是 ADSP。
+（之前 `docs/audio.md` 追加 21~25 的结论需要按此修正。）
+
+### 顺带修掉：麦克风偏置接线错了
+
+原厂 DT 的 `qcom,audio-routing` 拆出来是：
+
+```
+AMIC3  <- MIC BIAS3     ← 手持麦 Handset Mic 走这里
+AMIC4  <- MIC BIAS4
+DMIC0/1 <- MIC BIAS1
+DMIC2/3 <- MIC BIAS3
+DMIC4/5 <- MIC BIAS4
+LDO_RXTX <- MCLK
+```
+
+我们的 DT 原来写的是 `AMIC1/MIC BIAS1`、`AMIC2/MIC BIAS2`，
+`AMIC3`/`AMIC4` 还错误地挂在 **MIC BIAS2** 上 —— 也就是这台手机的麦
+（AMIC3 + MIC BIAS3）**偏置从来没上过电**。
+
+已改为与原厂一致（AMIC3→BS3、AMIC4→BS4，并补上 DMIC0-5 的偏置）。
+
+### 修完后仍然为 0
+
+DAPM 全链路 On（AMIC3 / MIC BIAS3 / ADC3 / DEC0 / SLIM TX0），
+`DEC0 Volume=124`（满），仍采到精确 0。
+
+用新增的调试通道（`snd_soc_wcd934x.dbg_writes="0x0a32=.."`）全量扫了：
+
+| 扫描 | 范围 | 结果 |
+|---|---|---|
+| `0x0a32` TX_PATH_CFG0 | 0x00-0xff 全部 256 个值 | 无命中 |
+| `0x0a38` TX_PATH_SEC1 | 0x00-0xff 全部 256 个值 | 无命中 |
+| `0x0a31` TX_PATH_CTL 的 bit7/6/4 组合 | — | 无变化 |
+| `0x0a34` TX_VOL / `0x0a39` HPF | — | 无变化 |
+
+分析时还发现 debugfs 读这些寄存器**前后不一致**
+（`0x0a31` 一次读 0x04、一次读 0x24），说明 regmap debugfs 对 banked 寄存器
+不可靠，寄存器级盲扫的收益已经很低。
+
+### 结论与下一步
+
+"精确 0"（不是本底噪声）说明 DEC 输出被硬关掉，而不是模拟静音。
+剩下的可能都要靠**厂商内核的写序列**比对：
+
+1. 拿小米开源内核（或反汇编 vendor 的 wcd934x）看 capture 路径完整写序列
+2. 或者用示波器确认 SPK/MIC 相关供电
+3. 实用替代：USB 声卡麦克风，或蓝牙耳机麦（走 HFP，绕开 codec 的 ADC）
+
+### 新增的调试工具（保留）
+
+`drivers/net/...` 不涉及，改的是 `sound/soc/codecs/wcd934x.c`：
+
+```c
+static char *dbg_writes;   /* 例：0x0a32=0x59,0x0a34=0x7c */
+module_param(dbg_writes, charp, 0644);
+/* 在采集 hw_params 末尾逐条写寄存器，并 dev_info 打印 */
+```
+
+配合 `/sys/kernel/debug/regmap/217:250:1:0/registers`（codec 全寄存器可读），
+以后调 codec 不用反复刷机。
