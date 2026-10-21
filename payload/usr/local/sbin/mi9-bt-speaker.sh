@@ -26,18 +26,18 @@
 # 配置 /etc/mi9-bt-speaker.conf：
 #   BT_MAC=40:31:3C:81:D6:DA
 #   BT_VOLUME=0.9
-#   BT_KEEPALIVE=1
+#   BT_KEEPALIVE=0（默认关：实测开保活反而让音箱更频繁断开）
 
 set -u
 
 BT_MAC_DEFAULT="40:31:3C:81:D6:DA"	# 小爱音箱-3418
 BT_VOLUME_DEFAULT="0.9"
-BT_KEEPALIVE_DEFAULT="1"
+BT_KEEPALIVE_DEFAULT="0"
 FALLBACK_POLL=30			# 慢兜底间隔（秒）
 RUNTIME_DIR=/run/user/0
 KEEPALIVE_PID=/run/mi9-bt-keepalive.pid
 DAEMON_PID=/run/mi9-bt-speaker.pid
-SILENCE=/usr/share/mi9/silence-60s.wav
+SILENCE=/usr/share/mi9/near-silence-60s.wav
 
 [ -r /etc/mi9-bt-speaker.conf ] && . /etc/mi9-bt-speaker.conf
 BT_MAC="${BT_MAC:-$BT_MAC_DEFAULT}"
@@ -89,21 +89,26 @@ stack_healthy() {
 ensure_audio_stack() {
 	stack_healthy && return 0
 
-	log "重建音频栈（pipewire=$(pgrep -xc pipewire 2>/dev/null || echo 0) wireplumber=$(pgrep -xc wireplumber 2>/dev/null || echo 0) pulse=$(pgrep -xc pipewire-pulse 2>/dev/null || echo 0)）"
-	systemctl --user stop pipewire-pulse wireplumber pipewire pipewire.socket >/dev/null 2>&1
-	pkill -x pipewire-pulse 2>/dev/null
+	# ★ 音频栈由独立的 systemd 单元管理（mi9-pipewire / mi9-pipewire-pulse /
+	#   mi9-wireplumber / mi9-session-dbus）。绝不在这里 nohup 起进程：
+	#   那样它们会落在本服务的 cgroup 里，systemctl restart 本服务时
+	#   连音频栈一起被杀掉，蓝牙随即断开。
+	log "重建音频栈（独立 systemd 单元）"
 	pkill -x wireplumber 2>/dev/null
+	pkill -x pipewire-pulse 2>/dev/null
 	pkill -x pipewire 2>/dev/null
-	sleep 2
-	nohup pipewire       >/var/log/mi9-pipewire.log       2>&1 &
-	sleep 2
-	nohup pipewire-pulse >/var/log/mi9-pipewire-pulse.log 2>&1 &
 	sleep 1
-	nohup wireplumber    >/var/log/mi9-wireplumber.log    2>&1 &
-	sleep 3
-	stack_healthy
-}
+	systemctl start mi9-session-dbus.service >/dev/null 2>&1
+	systemctl restart mi9-pipewire.service mi9-pipewire-pulse.service mi9-wireplumber.service >/dev/null 2>&1
 
+	i=0
+	while [ $i -lt 15 ]; do
+		sleep 1
+		stack_healthy && return 0
+		i=$((i + 1))
+	done
+	return 1
+}
 bt_connected() { bluetoothctl info "$BT_MAC" 2>/dev/null | grep -q "Connected: yes"; }
 bt_paired()    { bluetoothctl info "$BT_MAC" 2>/dev/null | grep -q "Paired: yes"; }
 
@@ -127,7 +132,8 @@ keepalive_running() {
 start_keepalive() {
 	node=$1
 	keepalive_running && return 0
-	[ -f "$SILENCE" ] || { log "缺少 $SILENCE，跳过保活"; return 1; }
+	[ -f "$SILENCE" ] || SILENCE=/usr/share/mi9/silence-60s.wav
+	[ -f "$SILENCE" ] || { log "缺少保活音源，跳过"; return 1; }
 	setsid sh -c "export XDG_RUNTIME_DIR=$RUNTIME_DIR; while :; do pw-play --target '$node' '$SILENCE' || sleep 1; done" \
 		>/var/log/mi9-bt-keepalive.log 2>&1 &
 	echo $! > "$KEEPALIVE_PID"
@@ -146,9 +152,18 @@ connect_once() {
 	bt_paired || { log "音箱 $BT_MAC 未配对（先 bluetoothctl pair $BT_MAC）"; return 1; }
 	bt_connected && return 0
 	log "连接 $BT_MAC ..."
-	bluetoothctl connect "$BT_MAC" >/dev/null 2>&1
-	sleep 3
-	bt_connected
+	# ★ 必须等连接真正建立再判断。
+	# 以前这里只 sleep 3 秒就检查，失败后 30 秒又发起新连接，
+	# 结果把上一次还在进行的握手打断，形成"永远连不上"的死循环。
+	bluetoothctl --timeout 25 connect "$BT_MAC" >/dev/null 2>&1
+	i=0
+	while [ $i -lt 20 ]; do
+		sleep 1
+		bt_connected && { log "连接成功（等待 ${i}s）"; return 0; }
+		i=$((i + 1))
+	done
+	log "连接失败"
+	return 1
 }
 
 apply_route() {
@@ -167,8 +182,14 @@ apply_route() {
 step() {
 	ensure_audio_stack || return 1
 	connect_once || return 1
-	sleep 1
-	apply_route
+	# 连接成功后蓝牙 sink 节点要过几秒才出现；
+	# 之前不等就调用 apply_route，sink 还没建好 -> 保活流起不来 -> 没音频 -> 音箱又断。
+	i=0
+	while [ $i -lt 15 ]; do
+		apply_route && return 0
+		sleep 1; i=$((i + 1))
+	done
+	return 1
 }
 
 do_once() {

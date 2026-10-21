@@ -1,0 +1,17 @@
+[Unit]
+Description=Mi9 PipeWire (headless root)
+After=mi9-session-dbus.service
+Requires=mi9-session-dbus.service
+
+[Service]
+Type=simple
+Environment=XDG_RUNTIME_DIR=/run/user/0
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus
+ExecStartPre=/bin/mkdir -p /run/user/0
+ExecStartPre=/bin/chmod 700 /run/user/0
+ExecStart=/usr/bin/pipewire
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

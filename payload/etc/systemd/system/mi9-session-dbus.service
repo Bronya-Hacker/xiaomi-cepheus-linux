@@ -1,0 +1,15 @@
+[Unit]
+Description=Mi9 session D-Bus for headless root (required by WirePlumber)
+After=dbus.service
+Before=mi9-pipewire.service
+
+[Service]
+Type=simple
+ExecStartPre=/bin/mkdir -p /run/user/0
+ExecStartPre=/bin/chmod 700 /run/user/0
+ExecStart=/usr/bin/dbus-daemon --session --address=unix:path=/run/user/0/bus --nofork --nopidfile
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

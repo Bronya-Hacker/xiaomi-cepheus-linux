@@ -292,3 +292,89 @@ payload/etc/wireplumber/bluetooth.lua.d/52-autoconnect-a2dp.lua
 payload/etc/bluetooth/main.conf                    ReconnectUUIDs/Attempts/Intervals
 payload/usr/share/mi9/silence-60s.wav              保活流音源（11MB→gzip 11KB）
 ```
+
+---
+
+## 追加：v3 定稿 —— 四个把稳定性拖垮的细节（2026-10-22 03:25）
+
+### 实测数据（最终）
+
+| 场景 | 结果 |
+|---|---|
+| **连续播放整首歌（3 分 20 秒，200 秒采样）** | ✅ **全程 connected=1，零断开** |
+| 纯空闲 180 秒（无保活流） | ✅ 180 秒不断 |
+| 纯空闲 + 保活流 | ❌ 每 35~65 秒断一次 |
+
+### 坑 1（最反直觉）：静音保活流反而害事
+
+一开始以为"空闲会断 → 常驻静音流保活"。实测恰恰相反：
+
+```
+有保活流：每 35~65 秒断一次
+无保活流：180 秒纯空闲不断、整首歌 200 秒不断
+```
+
+原因：保活流是"循环播放 60 秒文件"，每次文件结束都会重启一路音频流；
+这个音箱把"流结束"当成播放完毕并断开链路。
+
+→ **`BT_KEEPALIVE=0` 是正确默认值。**
+（`/usr/share/mi9/{silence,near-silence}-60s.wav` 留着备用，但别默认开）
+
+### 坑 2：音频栈不能作为本服务的子进程
+
+之前在图省事在服务里 `nohup pipewire &`。后果：
+这些进程落在 `mi9-bt-speaker.service` 的 cgroup 里，
+`systemctl restart mi9-bt-speaker` 会**把它们一起杀掉** →
+音频栈消失 → 蓝牙随之断开 → 看起来像"随机掉线"。
+
+→ 改成四个**独立 systemd 单元**：
+
+```
+mi9-session-dbus.service     会话总线 unix:path=/run/user/0/bus
+mi9-pipewire.service         After/Requires 上面那个
+mi9-pipewire-pulse.service   PulseAudio 兼容层（播放器要用）
+mi9-wireplumber.service      After mi9-pipewire
+```
+
+全部 `WantedBy=multi-user.target` + `Restart=always`。
+`mi9-bt-speaker` 只负责"连接 + 路由"，不再管进程生死。
+
+### 坑 3：`bluetoothctl connect` 要等它真的连上
+
+以前：`bluetoothctl connect` → `sleep 3` → 检查 → 失败就 30 秒后重试。
+问题：连接握手常常要 5~20 秒，3 秒就判失败，**下一次重试把还在进行的握手打断**，
+于是永远连不上（日志里能看到每 30 秒一次"连接"却从不成功）。
+
+→ 现在：
+
+```sh
+bluetoothctl --timeout 25 connect "$MAC"
+i=0; while [ $i -lt 20 ]; do
+	sleep 1; bt_connected && return 0; i=$((i+1))
+done
+```
+
+### 坑 4：连上后要等 A2DP sink 节点出现
+
+连接成功后 PipeWire 这边要过几秒才建出 `bluez_output.*` 节点。
+不等就调用 `apply_route` 会失败，路由/音量都没设上。
+
+→ `step()` 里最多轮询 15 秒等 sink 出现。
+
+### 现在的完整体验
+
+```sh
+mpg123 -o pulse 音乐.mp3     # 整首放完，全程不掉线
+mi9-bt-speaker status        # 看状态
+```
+
+空闲几分钟后音箱可能自己断（音箱固件行为，不是我们），
+守护会在几秒内自动重连；一旦开始放音乐就非常稳。
+
+### 与主流的对照（最终结论）
+
+- ✅ 主流：独立 systemd 单元托管单实例 PipeWire 栈、`suspend-timeout=0`、
+  `bluez5.auto-connect`、BlueZ `ReconnectUUIDs`、设备 trust
+- ⚠️ 必要补充：事件驱动监督（BlueZ 那几条只覆盖启动和链路超时）
+- ⚠️ 环境所迫：手工造 `XDG_RUNTIME_DIR` 与会话 D-Bus（root 无 logind 会话）
+- ❌ 已废弃：静音保活流（实测有害）

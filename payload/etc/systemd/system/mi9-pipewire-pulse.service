@@ -1,0 +1,15 @@
+[Unit]
+Description=Mi9 PipeWire PulseAudio compatibility layer
+After=mi9-pipewire.service
+Requires=mi9-pipewire.service
+
+[Service]
+Type=simple
+Environment=XDG_RUNTIME_DIR=/run/user/0
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus
+ExecStart=/usr/bin/pipewire-pulse
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
