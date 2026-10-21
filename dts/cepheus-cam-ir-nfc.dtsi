@@ -379,6 +379,25 @@
 		platform { sound-dai = <&q6routing>; };
 	};
 
+	/* ★ 采集端口排查用：把另外几个 SLIM TX 端口也挂上同一个 codec 采集 DAI，
+	 * 用来确认麦克风到底走的是哪个 AFE SLIM 端口（2026-10-21）。
+	 */
+	slimcap2-dai-link {
+		link-name = "SLIM Capture 2";
+		no-pcm;
+		codec { sound-dai = <&wcd9340 AIF1_CAP>; };
+		cpu { sound-dai = <&q6afedai SLIMBUS_1_TX>; };
+		platform { sound-dai = <&q6routing>; };
+	};
+
+	slimcap3-dai-link {
+		link-name = "SLIM Capture 3";
+		no-pcm;
+		codec { sound-dai = <&wcd9340 AIF1_CAP>; };
+		cpu { sound-dai = <&q6afedai SLIMBUS_2_TX>; };
+		platform { sound-dai = <&q6routing>; };
+	};
+
 	/* 扬声器：AFE secondary MI2S -> CS35L41 -> 喇叭 */
 	mi2s-spk-dai-link {
 		link-name = "SEC MI2S Playback";

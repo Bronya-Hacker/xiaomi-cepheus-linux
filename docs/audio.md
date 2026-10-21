@@ -1256,3 +1256,22 @@ Linux 侧（DAPM、寄存器、通道、供电、格式）全部就绪且可验�
 
 - USB 麦克风（USB Host 已验证可用，`CONFIG_SND_USB_AUDIO=m`）
 - 或等以后深入研究 ADSP 侧拓扑（需要 ADSP 文档或反汇编 ADSP 固件）
+
+## 追加25：换 SLIM TX 端口、data_format、dev_id 仍为 0（2026-10-21 23:35）
+
+| 试验 | 结果 |
+|---|---|
+| `q6afe` 的 `data_format` = 0/1/2 | 只有 0 可用（1/2 直接配置失败），仍 0 |
+| `slim_dev_id` = 1/0 | 都 0 |
+| 采集走 `SLIMBUS_1_TX` / `SLIMBUS_2_TX`（新增的 BE 链路） | 都 0 |
+| 播放持续音源（用户持续放音乐）+ 上述组合 | 都 0 |
+
+至此麦克风在 Linux 侧已经没有可调项了。
+
+### 附带发现（对以后调试很有用）
+
+- **WiFi SSH 有时会被 sshd 限流**（多轮探测后 `Connection closed`），
+  但 **USB 网络（`ssh mi9-usb` → 169.254.42.1）一直稳定可用**，
+  是很好的备用通道。
+- DT 里新增的 `slimcap2/3-dai-link`（SLIMBUS_1_TX / 2_TX）暂时保留，
+  以后查 ADSP 端口映射时还用得上。

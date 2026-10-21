@@ -85,7 +85,8 @@ do_flash() {
 	sync
 
 	# 回读校验
-	n=$((isz / 1024 / 1024))
+	# 向上取整到 MB，再按精确字节数截断比较（镜像可能不是整 MB）
+	n=$(( (isz + 1048575) / 1048576 ))
 	[ "$n" -lt 1 ] && n=1
 	a=$(md5sum "$img" | cut -d' ' -f1)
 	b=$(dd if="$dev" bs=1M count=$n 2>/dev/null | head -c "$isz" | md5sum | cut -d' ' -f1)
