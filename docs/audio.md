@@ -833,3 +833,50 @@ FE 会话起来了，但 DSP 一个 period 都不消费 → 1 秒超时。
 - 模块参数：`codec_clk_id`（PLL 时钟源）、`boost_mv`（升压电压）、
   `sd_line_override`（MI2S 数据线）—— 都可在运行时调整，方便后续排查
 - 调试打印：`OKDBG`（功放上电后寄存器）、`BOOSTDBG`、`AFEDBG/RTDBG/ASMDBG`（DSP 命令）
+
+---
+
+## 追加15：★ 喇叭硬件确认没坏（2026-10-21 19:45）
+
+### 怎么验证的
+
+用桌面上现成的 MIUI 线刷包
+`cepheus_images_V12.5.5.0.RFACNXM_20211025.0000.00_11.0_cn.tgz` 里的 `boot.img`，
+**只做 `fastboot boot`（从内存启动，不写任何分区）**：
+
+```sh
+tar xzf cepheus_images_*.tgz --wildcards '*/images/boot.img'
+fastboot boot images/boot.img
+```
+
+MIUI 正常进桌面，**放音乐喇叭有声** → **喇叭、功放、走线全部正常**。
+
+测完恢复 Linux（`boot` 分区其实没被改动，因为 `fastboot boot` 只写内存）：
+
+```sh
+fastboot flash boot    out/OTG-boot-cepheus.img   # DTB/EDK2
+fastboot flash recovery out/kernelfat.img         # 内核/模块
+```
+
+### 因此结论明确
+
+问题 100% 在**我们的软件配置**，不是硬件。剩下的差异只可能在：
+
+1. **功放的保护 DSP 固件没跑起来**（原厂是 `DSP1 Firmware=Protection` + `PCM Source=DSP`）。
+   主线能解析固件但**写 DSP 内存超时**（`PM_PACKED: -110`），
+   即使功放已上电、PLL 已锁也一样 —— 说明 DSP 核本身没在应答。
+2. 原厂 reg_default 里那些主线不写的寄存器
+   （`0x6404/0x6408` VPBR/VBBR 保护阈值、`0x4000`、`0x3818` 等）。
+
+### 已核对过、确认**一致**的部分
+
+- `cs35l41_pup_patch` / `pdn_patch`：与原厂逐字节相同
+- `cs35l41_dsp1_regions`（DSP 内存窗口）：type/base 完全相同
+- `revb0_errata_patch`：原厂多一条 `ASP_CONTROL4(0x4854)=0x01010000`（已补上）
+- 原厂独有的 `PCM Source` 控件：`DAC_PCM1_SRC(0x4C00)`，ASP=8 / DSP=50（已做成参数）
+
+### 下一步方向
+
+- 继续查 DSP 核为什么不响应（需要看 HALO 引导的私有步骤/MCLK 需求）
+- 或者：**既然 MIUI 音频完全正常，把"小爱音箱"的软件直接做在 Android 上**
+  （喇叭、麦克风、蓝牙都是现成的），比死磕主线音频更快见效
