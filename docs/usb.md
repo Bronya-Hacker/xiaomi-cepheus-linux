@@ -131,3 +131,58 @@ input: SEMICO USB Gaming Keyboard → 4 个输入节点（kbd + consumer + syste
 插扩展坞+键盘 → vbus_users=1 charger_online=0 → host  → 键盘 4 个输入节点
 插电脑        → vbus_users=0 charger_online=1 → device → usb0 恢复
 ```
+
+---
+
+## 接安卓手机 / 读文件（MTP）—— 2026-10-21 实测通过
+
+### 现象与概念
+
+把另一台安卓手机用 OTG 线接上来、选"传输文件"，**它不是 U 盘**：
+
+```
+1-1.3: 2717:ff48  REDMI K90 Ultra  [Xiaomi]
+1-1.3:1.0: class=06 subclass=01 proto=01   ← class 6 = PTP/Still Image（MTP）
+1-1.3:1.1: class=ff subclass=42 proto=01   ← 小米厂商接口
+```
+
+`class=06` 就是 **MTP**。内核只做枚举，读写文件要用户态客户端。
+（现代安卓都不提供 mass storage 了，插谁都一样。）
+
+### 做法
+
+```sh
+apt-get update                       # 必须，否则找不到包
+apt-get install -y jmtpfs            # 依赖 libmtp9 + libfuse2
+mkdir -p /mnt/mtp
+jmtpfs -o allow_other /mnt/mtp
+ls /mnt/mtp/内部存储设备              # 就能看到照片、Download 等
+```
+
+实测：
+
+```
+jmtpfs 231G 178G 54G 77% /mnt/mtp      ← 对端手机容量
+cp  <照片> /tmp/x.jpg                   ← 138746 字节，0.02 秒
+md5 源文件与本地副本一致 ✓              ← 4e60e97325cc... 两边相同
+file 显示 JPEG 1427x1080 ✓
+```
+
+### 封成工具：`mi9-mtp`
+
+```sh
+mi9-mtp           # 看角色 / 接入设备 / 挂载状态
+mi9-mtp mount     # 挂载到 /mnt/mtp（会检查 role 必须是 host）
+mi9-mtp umount    # 卸载
+mi9-mtp ls
+```
+
+前提：`role` 必须是 **host**（拔掉充电线、只插 OTG 设备；或 `mi9-usb host`），
+对端手机要选"传输文件/MTP"而不是"仅充电"。
+
+### 注意
+
+- `jmtpfs` 是 apt 装的，**不在 payload 里**；如果哪天 rootfs 重刷，需要再装一次。
+- MTP 走的是 PTP 协议，**大文件慢**（比 mass storage 慢很多），但它不需要把
+  对端手机的存储块设备暴露出来，也只能这样。
+- 挂载期间不要热拔线，先 `mi9-mtp umount`。

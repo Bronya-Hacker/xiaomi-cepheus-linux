@@ -3,22 +3,23 @@
 #
 # ★ 为什么不直接用 Type-C（tcpm）的 data_role：
 #   本机 tcpm 的 CC 判断有偏差 —— 插电脑（DFP）会被读成 not_dfp，
-#   于是它认为该当 host，dwc3 就不会以设备身份挂上总线，
-#   usb0 起不来、USB 网卡断掉（2026-10-21 实测）。
+#   于是它认为该当 host，dwc3 就不以设备身份挂总线，usb0 起不来。
 #
-# 改用更可靠的判据（都来自 PMIC，和 CC 无关）：
-#   1) 我们自己在对 Type-C 口供 5V（usb_vbus 有使用者 = 在给外设供电）→ host
-#   2) 外部有 VBUS 进来（pm8150b-charger online=1 = 在从电脑取电）    → device
-#   3) 什么都没插                                                      → device
-#      （保持 device，这样 USB 网卡随时可用）
-#
-# 实测：
-#   插 USB-C 扩展坞 + 键盘 → vbus_users=1 charger_online=0 → host，键盘可用
-#   插电脑                  → vbus_users=0 charger_online=1 → device，usb0 恢复
+# ★★ 为什么要消抖 + 优先当设备（2026-10-21 踩到卡死）：
+#   如果用带充电口的扩展坞，插上电脑后会出现「我们在对外供 5V」和
+#   「外部也在供 VBUS」两个条件同时成立的情况。若判据在这两者之间来回跳，
+#   就会不停写 role，dwc3 反复切 host/device → 整机卡死（sshd 连 banner
+#   都发不出来）。
+#   所以：
+#     1) **外部供电优先判为 device**（充电优先，保住 USB 网卡）；
+#     2) 必须连续 3 次采样一致才真正切换（约 3 秒消抖）；
+#     3) 两次切换之间至少间隔 5 秒。
 set -u
 
 RS=/sys/class/usb_role/a600000.usb-role-switch/role
 CHG=/sys/class/power_supply/pm8150b-charger/online
+STABLE_NEED=3     # 连续一致次数
+MIN_GAP=5         # 两次切换最小间隔（秒）
 
 log() { logger -t mi9-usb-role "$*"; }
 
@@ -31,39 +32,60 @@ vbus_users() {
 	done
 }
 
-# role switch 是 dwc3 probe 时才建的，比 typec 晚
+decide() {
+	vu=$(vbus_users)
+	vu=${vu:-0}
+	co=$(cat "$CHG" 2>/dev/null || echo 0)
+
+	# 外部供电优先 → 当设备（充电 / USB 网卡）
+	if [ "$co" = "1" ]; then
+		echo device
+	elif [ "$vu" -gt 0 ]; then
+		echo host
+	else
+		echo device
+	fi
+}
+
+# role switch 由 dwc3 probe 时创建，比 typec 晚
 i=0
 while [ ! -e "$RS" ] && [ $i -lt 120 ]; do
 	sleep 0.5
 	i=$((i + 1))
 done
-[ -e "$RS" ] || { log "role switch 不存在（dwc3 未开 allow_userspace_control？），退出"; exit 0; }
+[ -e "$RS" ] || { log "role switch 不存在，退出"; exit 0; }
 
-log "启动（判据：usb_vbus 使用者 / 充电器 online）"
+log "启动（判据：charger-online 优先 device，其次 usb_vbus 有使用者→host；3 次消抖）"
 
-last=""
+cand=""
+cnt=0
+last_switch=0
+
 while :; do
-	vu=$(vbus_users)
-	vu=${vu:-0}
-	co=$(cat "$CHG" 2>/dev/null || echo 0)
+	d=$(decide)
 
-	if [ "$vu" -gt 0 ]; then
-		want=host
+	if [ "$d" = "$cand" ]; then
+		cnt=$((cnt + 1))
 	else
-		# 外部供电 或 什么都没插 → 都当设备
-		want=device
+		cand="$d"
+		cnt=1
 	fi
 
-	if [ "$want" != "$last" ]; then
+	if [ "$cnt" -ge "$STABLE_NEED" ]; then
 		now=$(cat "$RS" 2>/dev/null)
-		if [ "$now" != "$want" ]; then
-			if echo "$want" > "$RS" 2>/dev/null; then
-				log "切换 -> $want (vbus_users=$vu charger_online=$co)"
-			else
-				log "写 $RS 失败"
+		if [ "$now" != "$d" ]; then
+			ts=$(date +%s)
+			if [ $((ts - last_switch)) -ge "$MIN_GAP" ]; then
+				if echo "$d" > "$RS" 2>/dev/null; then
+					last_switch=$ts
+					cnt=0
+					log "切换 -> $d（连续 $STABLE_NEED 次一致）"
+				fi
 			fi
+		else
+			cnt=0
 		fi
-		last="$want"
 	fi
+
 	sleep 1
 done
