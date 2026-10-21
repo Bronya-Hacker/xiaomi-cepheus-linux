@@ -87,3 +87,26 @@
 - 模块/Image/payload 在 kernelfat → **刷 kernelfat**（`fastboot flash recovery`）。
 - 两个都改了就都要刷。
 - ★ 千万别 `fastboot erase dtbo/vbmeta`。
+
+---
+
+## ⚠️ 扫 `CDC_IF_ROUTER_TX_MUX_CFG0`(0x0d3a) 会让整机卡死（2026-10-22 05:35）
+
+给 TX0 端口扫描 `0x0d3a` 的取值（0/1/2/3/4/5/6/7/8/15）时，
+`arecord` 进程进入 **D 状态（不可中断）**，`kill -9` 无效，
+连 `systemctl reboot` 都推不动 —— 只能长按电源 10 秒强制重启。
+
+### 建议
+
+- **不要**再盲扫这个寄存器。已知安全值只有 `0x01`（RX_MIX_TX0）和 `0x02`（DEC0）。
+- 扫 codec 寄存器一律遵守：
+  1. 一次只改一个寄存器
+  2. 每次捕获都加 `timeout`（我们用的是 `timeout -k 3 8`）
+  3. 发现 `arecord` 卡住就**立刻停止**，别继续往下试
+  4. 出现 D 状态进程时直接断电重启，别指望 kill
+
+### 同类风险
+
+之前 SLIMbus 那次卡死（`INIT_LIST_HEAD` 破坏链表）也是 D 状态不可中断。
+凡是"改完寄存器后音频通路直接没有数据"的情况，都可能把内核拖死在
+驱动里的等待上。
