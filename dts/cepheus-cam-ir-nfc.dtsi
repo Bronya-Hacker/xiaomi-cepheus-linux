@@ -213,6 +213,39 @@
 	};
 };
 
+/* ★ PM8150 的时钟分频器（spmi-clkdiv）。
+ * NFC 的参考时钟就来自这里 —— 芯片拉低 CLKREQ 请求时钟，
+ * 由 PMIC 的 div_clk 输出给它（CLKREQ 门控是硬件行为）。
+ * 主线 pm8150.dtsi 里根本没有这个节点，所以这些时钟从不输出，
+ * 芯片拿不到时钟 → I2C 能 ACK 但读回全是 0。
+ */
+&pm8150_0 {
+	pm8150_clkdiv: clock-controller@5b00 {
+		compatible = "qcom,spmi-clkdiv";
+		reg = <0x5b00 0x200>;
+		#clock-cells = <1>;
+		qcom,num-clkdivs = <2>;
+		clock-output-names = "pm8150_div_clk1", "pm8150_div_clk2";
+		clocks = <&rpmhcc RPMH_CXO_CLK>;
+		clock-names = "xo";
+	};
+};
+
+/* PM8150L 的分频时钟（可能是 NFC 的时钟源） */
+&spmi_bus {
+	pmic@4 {
+		pm8150l_clkdiv: clock-controller@5b00 {
+			compatible = "qcom,spmi-clkdiv";
+			reg = <0x5b00 0x100>;
+			#clock-cells = <1>;
+			qcom,num-clkdivs = <1>;
+			clock-output-names = "pm8150l_div_clk1";
+			clocks = <&rpmhcc RPMH_CXO_CLK>;
+			clock-names = "xo";
+		};
+	};
+};
+
 &i2c9 {
 	status = "okay";
 	/* SN100U �ϵ�������� 100kHz���ų������ʵ��µĲ���Ӧ */
@@ -234,8 +267,8 @@
 		/* SN100U �Ĳο�ʱ������ PMIC �� ln_bb_clk3��19.2MHz����
 		 * CLKREQ һֱ���ͱ�ʾ������ʱ�ӣ�ûʱ��оƬ����ȫ����Ӧ NCI��
 		 */
-		clocks = <&rpmhcc RPMH_LN_BB_CLK3>;
-		clock-names = "nfc_clk";
+		clocks = <&pm8150_clkdiv 1>, <&pm8150_clkdiv 2>, <&pm8150l_clkdiv 1>;
+		clock-names = "nfc_clk", "nfc_clk2", "nfc_clk3";
 
 		pinctrl-names = "default";
 		pinctrl-0 = <&nfc_int_active &nfc_enable_active &nfc_firm_active &nfc_clkreq_active>;

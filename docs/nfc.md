@@ -169,3 +169,96 @@ vendor 内核别处控制；主线里我们没找到对应 regulator。
 - NFC 节点：`clocks = <&rpmhcc RPMH_LN_BB_CLK3>`、`nfc_clk`
 - 驱动：`nxp-nci-i2c` 支持可选 `nfc_clk`
 - 工具：`tools/nfc-poll-netlink.c`、`tools/nci-script.c`
+
+---
+
+## 追加：拿到厂商 NFC 驱动 + 修好 PMIC 时钟链路（2026-10-22 06:25）
+
+### 设备是有反应的，问题在时钟
+
+用厂商的上电时序（`nfcc_hw_check`）测试：
+
+```
+VEN=1 →10ms→ VEN=0 →10ms→ VEN=1 →10ms→ CORE_RESET(20 00 01 00)
+```
+
+- 芯片 A**CK 地址 0x28**（i2cdetect 能看到）
+- 写入**成功**（无 I2C 错误）
+- 但读取**恒为 0x00**，任何长度都是
+- **CLKREQ(GPIO113)**：VEN 关时浮空=1，VEN 开时芯片主动拉低=**0（在请求时钟）**
+
+→ 结论：芯片 I2C 从机能应答（由 SCL 驱动），但核心没跑起来 —— **参考时钟没到**。
+
+### 修掉的三个真实缺陷
+
+**1. 主线 DT 完全没有 PMIC 时钟分频器节点**
+
+原厂有三个 `qcom,spmi-clkdiv`：
+
+```
+PM8150  clock-controller@5b00  reg<0x5b00 0x200>  num-clkdivs=2  → div_clk1/2
+PM8150B clock-controller@5b00  reg<0x5b00 0x100>  num-clkdivs=1
+PM8150L clock-controller@5b00  reg<0x5b00 0x100>  num-clkdivs=1
+```
+
+主线 `pm8150.dtsi` 里**一个都没有**。已补进板级 dtsi：
+
+```dts
+&pm8150_0 {
+	pm8150_clkdiv: clock-controller@5b00 {
+		compatible = "qcom,spmi-clkdiv";
+		reg = <0x5b00 0x200>;
+		#clock-cells = <1>;
+		qcom,num-clkdivs = <2>;
+		clock-output-names = "pm8150_div_clk1", "pm8150_div_clk2";
+		clocks = <&rpmhcc RPMH_CXO_CLK>;
+		clock-names = "xo";
+	};
+};
+```
+
+**2. `CONFIG_SPMI_PMIC_CLKDIV` 没编译**
+
+```
+# CONFIG_SPMI_PMIC_CLKDIV is not set
+```
+驱动在树里（`drivers/clk/qcom/clk-spmi-pmic-div.c`）但没启用。已改为 `=y`。
+
+**3. clkdiv 索引是 1 基的，且默认频率极低**
+
+- `clocks = <&pm8150_clkdiv 0>` 非法，驱动报
+  `index value 0 is invalid; allowed range [1, 2]` → 要用 **1**
+- 默认 rate 只有 **300kHz**，驱动里必须先 `clk_set_rate(19200000)` 再使能
+
+修完后实测：
+
+```
+div_clk1  rate=19200000  enable=1   ← PMIC 的 NFC 候选时钟，真的在跑了
+div_clk2  rate=19200000  enable=1
+dmesg: nfc_clk set to 19200000 Hz / nfc_clk enabled
+```
+
+### 但 CLKREQ 仍是 0、读取仍是 0
+
+说明 `div_clk1/div_clk2` **不是** NFC 的时钟源（或者还有别的门控）。
+
+PM8150L 的那路分频器因**名字冲突**注册失败：
+
+```
+failed to register clk 'div_clk1' (-EEXIST)
+```
+
+驱动按 `div_clk%d` 硬编码命名，两个 PMIC 撞名 → 需要改驱动让它用
+`clock-output-names`，才能测 PM8150L 那一路。
+
+### 下一步
+
+1. 改 `clk-spmi-pmic-div.c` 用 DT 的 `clock-output-names` 命名（解决撞名），
+   然后测 PM8150L div_clk1
+2. 若仍不行，怀疑 NFC 时钟来自别处（SoC 内部无 NFC 时钟，也可能由
+   bootloader 直接配置 PMIC 的某一路而 Linux 看不到）
+
+### 顺带确认
+
+`/sys/class/gpio` 没编进内核（用 `gpioset` 的 GPIO v2 uAPI 代替），
+写了个 `tools/nfc-pulse.c` 可以精确做 VEN 脉冲 + 发 NCI 命令。
