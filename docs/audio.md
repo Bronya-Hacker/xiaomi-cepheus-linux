@@ -1972,3 +1972,82 @@ codec_clk_id 0(SCLK)/1(LRCLK)、四种帧格式。
    没波形说明是 AFE 没往外送
 2. 或 CS35L41 数据手册确认 `SP_FORMAT`/`SP_RATE_CTRL(0x28)` 的完整位定义
 3. 或反汇编厂商 `audio_cs35l41.ko`，对比它的 `set_fmt` / 初始化寄存器序列
+
+---
+
+## 追加35：★ 找到上游方案 —— CS35L41 走的是 TDM，不是 I2S（2026-10-22 19:30）
+
+### 怎么找到的
+
+沙箱里 web 搜索用不了（DNS 被拦），但**设备本身能联网**，用 `gh-proxy.com`
+抓到了上游项目 `map220v/sm8150-mainline` 的 `sound/soc/qcom/sm8150.c`：
+
+```
+https://gh-proxy.com/https://raw.githubusercontent.com/map220v/sm8150-mainline/master/sound/soc/qcom/sm8150.c
+```
+
+### 上游的做法（原文）
+
+```c
+static const struct {
+	unsigned int rx[1];
+} cs35l41_tdm_channel_map[] = {
+	{.rx = {6}}, /* BR */
+	{.rx = {7}}, /* TR */
+	{.rx = {6}}, /* BL */
+	{.rx = {7}}, /* TL */
+};
+
+	/* call dai driver's set_sysclk() callback */
+	snd_soc_dai_set_sysclk(codec_dai, 0, 12288000, SND_SOC_CLOCK_IN);
+	/* call component driver's set_sysclk() callback */
+	snd_soc_component_set_sysclk(codec_dai->component, 0, 0, 12288000, SND_SOC_CLOCK_IN);
+	/* setup channel map */
+	snd_soc_dai_set_channel_map(codec_dai, 0, NULL, 1, cs35l41_tdm_channel_map[j].rx);
+```
+
+TDM hw_params 里：
+
+```c
+	slot_width = 32;                 /* 只接受 SNDRV_PCM_FORMAT_S24_LE */
+	slot_mask = 0x44;                /* 槽位 2 和 6 */
+	snd_soc_dai_set_tdm_slot(cpu_dai, 0, slot_mask, 8, slot_width);   /* 8 槽 × 32bit */
+```
+
+### 这意味着什么
+
+- 参考时钟 **12.288 MHz = 48k × 256bit（8 槽 × 32bit）**
+- AFE 把 2 个声道放在**槽位 2 和槽位 6**
+- **功放只取槽位 6**
+
+而我们之前用 I2S（2 槽、BCLK 1.5MHz、槽位 0/1）—— 功放要的槽位 6 根本不存在。
+这就完美解释了「PLL 能锁上但永远静音」：帧率对得上（所以能锁相），但数据槽位对不上。
+
+### 已按上游做的改动
+
+1. DTS：`cpu = <&q6afedai QUATERNARY_TDM_RX_0>`（原来是 QUATERNARY_MI2S_RX）
+2. 机器驱动 TDM 分支里加 CS35L41 配置：
+   ```c
+   snd_soc_dai_set_sysclk(codec_dai, 0, 12288000, SND_SOC_CLOCK_IN);
+   snd_soc_component_set_sysclk(codec_dai->component, 0, 0, 12288000, SND_SOC_CLOCK_IN);
+   unsigned int rx_slot[1] = { 6 };
+   snd_soc_dai_set_channel_map(codec_dai, 0, NULL, 1, rx_slot);
+   ```
+3. BE fixup 里对 TDM 链路放开 **S24_LE**（原来强制 S16，导致 `set_params` 直接失败）
+4. codec 格式改为 **DSP_A**（必须先 `&= ~SND_SOC_DAIFMT_FORMAT_MASK`，
+   否则 I2S|DSP_A 同时置位会报 "Invalid or unsupported DAI format"）
+5. 播放用 `QUAT_TDM_RX_0 Audio Mixer MultiMedia1` 路由
+
+### 现在的结果
+
+```
+CS35L41 TDM: sysclk=12288000 slot=6
+AFEDBG port_start idx=36912 port_id=0x9030     ← TDM 端口起来了
+cs35l41: Enable(1) ok  PLL_LOCK=1
+         SP_FORMAT=0x18100000  (DSP_A)  RX_WL=0x18 (24bit)
+RTDBG stream_open port=72 rate=48000 ch=2 → matrix_map 成功
+ASMDBG run stream_id=1 ret=0                    ← ASM 流跑起来
+```
+
+**内核日志完全干净、无任何错误**，但 `aplay` 写数据时仍报
+`pcm_write: Input/output error`，PCM 立刻变成 closed。

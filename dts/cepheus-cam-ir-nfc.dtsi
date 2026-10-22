@@ -472,7 +472,20 @@
 		no-pcm;
 
 		codec { sound-dai = <&speaker_amp 0>; };
-		cpu { sound-dai = <&q6afedai QUATERNARY_MI2S_RX>; };
+		cpu { sound-dai = <&q6afedai QUATERNARY_TDM_RX_0>; };
+		platform { sound-dai = <&q6routing>; };
+	};
+
+	/* 环回自检用：功放的 ASP TX 会把 ASPRX 收到的数据回显出来，
+	 * 用这条链路从 QUAT MI2S TX 采回来，就能在不接示波器的
+	 * 情况下确认 I2S 数据到底有没有送到功放。
+	 */
+	quatcap-dai-link {
+		link-name = "QUAT MI2S Capture";
+		no-pcm;
+
+		codec { sound-dai = <&speaker_amp 0>; };
+		cpu { sound-dai = <&q6afedai QUATERNARY_MI2S_TX>; };
 		platform { sound-dai = <&q6routing>; };
 	};
 
