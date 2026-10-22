@@ -1935,3 +1935,40 @@ Main AMP    : On     CLASS H: On     SPK: On
 
 下一步需要：**示波器测 gpio138（SD0）**，或 CS35L41 数据手册，
 或反汇编厂商 `audio_cs35l41.ko` 的 set_fmt/寄存器初始化序列做逐位对比。
+
+### 追加34.1：帧格式与寄存器位全部核对通过
+
+`SP_FORMAT=0x10180200` 按主线头文件的掩码解码：
+
+| 字段 | 掩码 | 值 | 含义 |
+|---|---|---|---|
+| `ASP_FMT` | 0x0700 | **2** | I2S（正好是寄存器默认值，所以四种格式试下来没变化）|
+| `SCLK_MSTR` | 0x10 | 0 | SCLK 从机 |
+| `LRCLK_MSTR` | 0x01 | 0 | LRCLK 从机 |
+
+`DAC_PCM1_SRC=0x8` = **ASP**（不是 DSP），`PCM Source` 枚举也是 ASP。
+
+### 软件侧逐项核对表
+
+| 项目 | 状态 |
+|---|---|
+| 厂商配置里的接口 | `SND_DEVICE_OUT_SPEAKER → QUAT_MI2S_RX` ✅ 一致 |
+| 厂商 mixer 路由 | `QUAT_MI2S_RX Audio Mixer MultiMedia1` ✅ 一致 |
+| AFE 端口 | `port_id=0x1006` 启动成功 ✅ |
+| ADM 路由 | `stream_open fe=0 port=22 rate=48000 ch=2`，matrix_map 成功 ✅ |
+| 引脚复用 | gpio136-140 全部 `function=qua_mi2s` ✅ |
+| 功放上电 | `Enable(1) ok`，`PLL_LOCK=1` ✅ |
+| 功放寄存器 | GLOBAL_EN=1, OUT_MUTE=0, CLASS H=1, DAC src=ASP ✅ |
+| ASP 格式 | I2S，SCLK/LRCLK 从机 ✅ |
+| DAPM 通路 | AMP Playback → ASPRX1 → PCM Source → Main AMP → CLASS H → SPK 全 On ✅ |
+
+**唯一无法用软件确认的**：AFE 是否真的在 sd 线上送出数据。
+已排除的软件变量：sd_mask 0x1/0x2/0x4/0x8、amp_master 0/1、
+codec_clk_id 0(SCLK)/1(LRCLK)、四种帧格式。
+
+### 下一步必须靠硬件
+
+1. 示波器测 **gpio138（QUAT MI2S SD0）** 在播放时有没有波形 —— 有波形说明是功放侧问题，
+   没波形说明是 AFE 没往外送
+2. 或 CS35L41 数据手册确认 `SP_FORMAT`/`SP_RATE_CTRL(0x28)` 的完整位定义
+3. 或反汇编厂商 `audio_cs35l41.ko`，对比它的 `set_fmt` / 初始化寄存器序列
