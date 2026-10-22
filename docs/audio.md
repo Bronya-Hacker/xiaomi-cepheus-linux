@@ -1846,3 +1846,21 @@ Enable 依然 -110。
 - **示波器测 GPIO126（SCLK）**：确认 AFE 到底有没有输出位时钟
 - 或**反汇编厂商 HAL**：看它在播放前对 MI2S 引脚/时钟/功放做了什么（厂商能写那几根线）
 - 或确认 CS35L41 在这个硬件上是否还需要 MCLK（GPIO130），而 AFE 是否驱动它
+
+### 追加33.1：继续排除（2026-10-22 17:15）
+
+| 尝试 | 结果 |
+|---|---|
+| 上电超时 100ms → 500ms | 仍 -110（实测等了 527ms），不是时序 |
+| 确认 regmap volatile | `IRQ1_STATUS1` 是 volatile，不是缓存读到旧值 |
+| 确认中断屏蔽 | 驱动是读原始 STATUS 再在软件里比对 mask，读到的就是真实值 |
+| 确认 GLOBAL_EN | `PWR_CTRL1=0x1` → GLOBAL_EN 已置位 |
+| 确认 OTP 启动 | `STATUS4=0x3`，bit1 = OTP_BOOT_DONE 已置位 |
+| 确认供电 | `pm8150l_bob` enabled 3352mV，`vreg_s4a_1p8` 1.8V |
+| boost 类型 | `bsttype=0` = INT_BOOST，与外部电感/电容配置一致 |
+
+**剩下的谜团**：`STATUS1 = 0x00400000`（bit22）。这个位主线头文件里没有定义，
+需要 CS35L41 数据手册才能解读。它置位着，而 PUP_DONE（bit24）始终不来。
+
+下一步要么查数据手册里 bit22 的含义，要么和厂商的 `audio_cs35l41.ko` 行为对比，
+要么用示波器测 GPIO126 确认 AFE 是否真的输出位时钟。
