@@ -472,7 +472,7 @@
 		no-pcm;
 
 		codec { sound-dai = <&speaker_amp 0>; };
-		cpu { sound-dai = <&q6afedai QUATERNARY_MI2S_RX>; };
+		cpu { sound-dai = <&q6afedai SECONDARY_MI2S_RX>; };
 		platform { sound-dai = <&q6routing>; };
 	};
 
@@ -517,10 +517,12 @@
 		/* 主线 cs35l41 驱动假设复位是高有效：先拉低 2ms 再拉高释放�?		 * 原来按原厂语义写�?ACTIVE_LOW，逻辑 1 反而变成物理低�?		 * 等于一直按着复位，芯片永远等不到 OTP_BOOT_DONE�?		 */
 		VA-supply = <&vreg_s4a_1p8>;
 		VP-supply = <&vreg_bob>;
-		/* 功放�?I2S 引脚复用（qua_mi2s�?36 MCLK / 137-140 数据�?*/
-		pinctrl-names = "default";
-		pinctrl-0 = <&quat_mi2s_active>;
 
+		/* ★ 不要给 MI2S 引脚配 pinctrl：GPIO126-129（secondary MI2S）
+		 * 是 bootloader/TrustZone 保留的（其他 sm8150 板子 DT 都写着
+		 * gpio-reserved-ranges = <126 4>），Linux 一 request 就 -EINVAL，
+		 * 导致功放 probe 失败、声卡注册不出来。这些引脚已由 ABL 复用好。
+		 */
 		reset-gpios = <&tlmm 89 GPIO_ACTIVE_HIGH>;
 		interrupt-parent = <&tlmm>;
 		interrupts = <10 IRQ_TYPE_LEVEL_LOW>;
@@ -536,9 +538,13 @@
 
 /* 扬声器功放的音频输入：secondary MI2S（原�?gpio126-129�?*/
 &tlmm {
-	quat_mi2s_active: quat-mi2s-active {
-		pins = "gpio136", "gpio137", "gpio138", "gpio139", "gpio140";
-		function = "qua_mi2s";
+	/* 扬声器走的是 secondary MI2S（GPIO126-130），不是 quaternary。
+	 * 之前用 qua_mi2s 的引脚（136-140），结果功放拿不到位时钟、PLL 锁不上、
+	 * 上电超时 -110。
+	 */
+	sec_mi2s_active: sec-mi2s-active {
+		pins = "gpio126", "gpio127", "gpio128", "gpio129";
+		function = "sec_mi2s";
 		drive-strength = <8>;
 		bias-disable;
 	};

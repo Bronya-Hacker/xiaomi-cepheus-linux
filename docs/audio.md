@@ -1715,3 +1715,79 @@ ADC/偏置/增益/mux 全部正确，录音仍为精确 0。
 4. 退化路径写 16 个垃圾通道
 
 这些对内部放音、耳机、通话、内录**任何**走 WCD9340 的通路都必要。
+
+---
+
+## 追加32：扬声器三个真 bug（2026-10-22 16:10）
+
+### bug 1：DTS 用错了 MI2S 实例
+
+```dts
+cpu { sound-dai = <&q6afedai QUATERNARY_MI2S_RX>; };   ← 四号
+```
+
+但路由控件是 `SEC_MI2S_RX Audio Mixer`，原厂接线也是 **secondary MI2S**
+（GPIO126/127 = SCLK/WS，128 = SD0，130 = MCLK）。
+
+### bug 2：路由端口数据全 0 → ADM 拒绝
+
+`routing_hw_params()` 用 `port_data[cpu_dai->id]` 填采样率/声道/位宽，
+而 `q6routing_stream_open()` 读的是 `port_data[session->port_id]`。
+DAI 是 QUATERNARY（22）而 mixer 设的是 SECONDARY（18）→ **填的和读的不是同一格**：
+
+```
+RTDBG pre-open port=18 path=0 rate=0 ch=0 bits=0 topo=66322
+q6asm_dai_prepare: stream reg failed ret:-22
+```
+
+改成 `SECONDARY_MI2S_RX` 后：
+
+```
+I2SDBG id=18 rate=48000 bits=16 ch=2 sd_mask=0x1
+AFEDBG port_start idx=4098 port_id=0x1002
+（无 stream reg 错误）
+```
+
+### bug 3：功放的 pinctrl 去抢 TrustZone 保留的引脚
+
+我们给 cs35l41 加了 `pinctrl-0 = <&sec_mi2s_active>`（GPIO126-129），结果：
+
+```
+sm8150-pinctrl: error -EINVAL: pin-126 (0-0040)
+sm8150-pinctrl: could not request pin 126 from group gpio126
+cs35l41: Error applying setting, reverse things back
+platform sound: deferred probe pending: SEC MI2S Playback: codec dai not found
+```
+
+**功放 probe 失败 → codec dai 找不到 → 整张声卡都不注册**。
+其他 sm8150 板子 DT 里都有 `gpio-reserved-ranges = <0 4>, <126 4>`，
+说明这几位被 ABL/TrustZone 管着。
+
+原厂功放节点其实**只配了 IRQ 引脚**，没有 MI2S 引脚 —— 已照做移除，
+声卡恢复正常。
+
+### 现在卡在哪：功放没有 MCLK
+
+```
+cs35l41: Enable(1) failed: -110  STATUS3=0x20000080 (bit1=PLL_LOCK 为 0)
+```
+
+原厂 DT 里有我们漏掉的一项：
+
+```dts
+sec_mi2s_mclk {                     /* GPIO130 */
+	sec_mi2s_mclk_active {
+		pins = "gpio130";
+		function = "sec_mi2s";
+	};
+};
+```
+
+CS35L41 的 PLL 需要参考时钟，没有 MCLK 就锁不上、上电超时。
+
+### 下一步
+
+1. 把 GPIO130 mux 成 `sec_mi2s_mclk`，并给功放 `snd_soc_dai_set_sysclk()`
+2. 查 GPIO126/127/128 被判 reserved 的来源（`gpiochip_line_is_valid` 返回假），
+   原厂是能从 Linux mux 这几根线的
+3. 之后 Enable 应能成功，喇叭出声
