@@ -1,15 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0
+﻿// SPDX-License-Identifier: GPL-2.0
 #include <dt-bindings/sound/qcom,q6afe.h>
 #include <dt-bindings/sound/qcom,q6asm.h>
 #include <dt-bindings/sound/qcom,wcd934x.h>
 /*
- * Xiaomi Mi 9 (cepheus) —�?相机 / 红外 / NFC 的板级补�? *
- * �?scripts/apply-dts5.sh 追加�?sm8150-xiaomi-cepheus.dts 末尾�? * 这样 07-rebuild-all 之类的完整重建不会把它冲掉�? *
- * 相机部分目前状态：SoC 侧全部打通（时钟/GDSC/CCI/camss），
- * 但模组本身不上电，详�?docs/camera-port.md §15�? */
+ * Xiaomi Mi 9 (cepheus) 鈥旓拷?鐩告満 / 绾㈠ / NFC 鐨勬澘绾цˉ锟? *
+ * 锟?scripts/apply-dts5.sh 杩藉姞锟?sm8150-xiaomi-cepheus.dts 鏈熬锟? * 杩欐牱 07-rebuild-all 涔嬬被鐨勫畬鏁撮噸寤轰笉浼氭妸瀹冨啿鎺夛拷? *
+ * 鐩告満閮ㄥ垎鐩墠鐘舵€侊細SoC 渚у叏閮ㄦ墦閫氾紙鏃堕挓/GDSC/CCI/camss锛夛紝
+ * 浣嗘ā缁勬湰韬笉涓婄數锛岃锟?docs/camera-port.md 搂15锟? */
 
 / {
-	/* 相机 VIO�?.8V，GPIO132 使能（原�?camera_viodd_ldo�?*/
+	/* 鐩告満 VIO锟?.8V锛孏PIO132 浣胯兘锛堝師锟?camera_viodd_ldo锟?*/
 	cam_vio: regulator-cam-vio {
 		compatible = "regulator-fixed";
 		regulator-name = "cam_vio";
@@ -21,7 +21,7 @@
 		regulator-always-on;
 	};
 
-	/* 红外发射管的供电（ir-spi 驱动要求名为 irda_regulator 的电源） */
+	/* 绾㈠鍙戝皠绠＄殑渚涚數锛坕r-spi 椹卞姩瑕佹眰鍚嶄负 irda_regulator 鐨勭數婧愶級 */
 	ir_vreg: regulator-ir {
 		compatible = "regulator-fixed";
 		regulator-name = "ir_vreg";
@@ -31,7 +31,7 @@
 	};
 };
 
-/* ================= 相机 ================= */
+/* ================= 鐩告満 ================= */
 
 &camss {
 	status = "okay";
@@ -76,8 +76,8 @@
 		pinctrl-0 = <&cam_mclk0_active &cam_reset0_active &cam_vdig0_active>;
 		pinctrl-1 = <&cam_mclk0_suspend>;
 
-		/* IMX586：AVDD 2.8V、DOVDD 1.8V、DVDD 1.1�?.9V
-		 * 原厂 DT 命名是反的（cam_vdig 2.856V 才是 AVDD�?		 */
+		/* IMX586锛欰VDD 2.8V銆丏OVDD 1.8V銆丏VDD 1.1锟?.9V
+		 * 鍘熷巶 DT 鍛藉悕鏄弽鐨勶紙cam_vdig 2.856V 鎵嶆槸 AVDD锟?		 */
 		avdd-supply = <&vreg_l17a_3p0>;
 		dovdd-supply = <&cam_vio>;
 		dvdd-supply = <&vreg_s5a_1p9>;
@@ -130,9 +130,9 @@
 	};
 };
 
-/* ================= 红外（SPI1 / QUP S1, gpio114-117�?================= */
+/* ================= 绾㈠锛圫PI1 / QUP S1, gpio114-117锟?================= */
 
-/* QUP �?GPI DMA（geni-i2c/spi 需要） */
+/* QUP 锟?GPI DMA锛坓eni-i2c/spi 闇€瑕侊級 */
 &gpi_dma0 {
 	status = "okay";
 };
@@ -141,7 +141,7 @@
 	status = "okay";
 };
 
-/* IR �?qupv3_id_0（geniqup@8c0000）下�?spi1 */
+/* IR 锟?qupv3_id_0锛坓eniqup@8c0000锛変笅锟?spi1 */
 &qupv3_id_0 {
 	status = "okay";
 };
@@ -157,7 +157,7 @@
 	};
 };
 
-/* ================= NFC（NXP NQ, i2c9, 地址 0x28�?================= */
+/* ================= NFC锛圢XP NQ, i2c9, 鍦板潃 0x28锟?================= */
 
 &tlmm {
 	nfc_int_active: nfc-int-active {
@@ -181,8 +181,7 @@
 		bias-disable;
 	};
 
-	/* ԭ���� NFC �� CLKREQ �ţ�GPIO113����ɴ����������룬
-	 * ����Ļ���������գ�оƬ�ò����ο�ʱ�ӣ�I2C ��ֱ����Ӧ��-121����
+	/* 原锟斤拷锟斤拷 NFC 锟斤拷 CLKREQ 锟脚ｏ拷GPIO113锟斤拷锟斤拷纱锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷耄?	 * 锟斤拷锟斤拷幕锟斤拷锟斤拷锟斤拷锟斤拷锟秸ｏ拷芯片锟矫诧拷锟斤拷锟轿匡拷时锟接ｏ拷I2C 锟斤拷直锟斤拷锟斤拷应锟斤拷-121锟斤拷锟斤拷
 	 */
 	nfc_clkreq_active: nfc-clkreq-active {
 		pins = "gpio113";
@@ -191,17 +190,14 @@
 		bias-pull-up;
 	};};
 
-/* NFC �?qupv3_id_1（geniqup@ac0000）下�?i2c9 */
+/* NFC 锟?qupv3_id_1锛坓eniqup@ac0000锛変笅锟?i2c9 */
 &qupv3_id_1 {
 	status = "okay";
 };
 
-/* RPMH 的 LN_BB_CLK2 固定 19.2MHz，而 WCD9340 需要 9.6MHz。
- * 原厂用 qcom,audio-ref-clk 驱动二分频，主线没这个驱动，
- * 我们一直把 19.2MHz 直接给 codec、驱动却按 9.6MHz 算分频，
- * 时钟差 2 倍 —— 这是 ADC/DEC 无法工作的直接原因。
- * 用标准 fixed-factor-clock 实现二分频。
- */
+/* RPMH 鐨?LN_BB_CLK2 鍥哄畾 19.2MHz锛岃€?WCD9340 闇€瑕?9.6MHz銆? * 鍘熷巶鐢?qcom,audio-ref-clk 椹卞姩浜屽垎棰戯紝涓荤嚎娌¤繖涓┍鍔紝
+ * 鎴戜滑涓€鐩存妸 19.2MHz 鐩存帴缁?codec銆侀┍鍔ㄥ嵈鎸?9.6MHz 绠楀垎棰戯紝
+ * 鏃堕挓宸?2 鍊?鈥斺€?杩欐槸 ADC/DEC 鏃犳硶宸ヤ綔鐨勭洿鎺ュ師鍥犮€? * 鐢ㄦ爣鍑?fixed-factor-clock 瀹炵幇浜屽垎棰戙€? */
 &{/} {
 	audio_ref_clk: audio-ref-clk {
 		compatible = "fixed-factor-clock";
@@ -213,12 +209,8 @@
 	};
 };
 
-/* ★ PM8150 的时钟分频器（spmi-clkdiv）。
- * NFC 的参考时钟就来自这里 —— 芯片拉低 CLKREQ 请求时钟，
- * 由 PMIC 的 div_clk 输出给它（CLKREQ 门控是硬件行为）。
- * 主线 pm8150.dtsi 里根本没有这个节点，所以这些时钟从不输出，
- * 芯片拿不到时钟 → I2C 能 ACK 但读回全是 0。
- */
+/* 鈽?PM8150 鐨勬椂閽熷垎棰戝櫒锛坰pmi-clkdiv锛夈€? * NFC 鐨勫弬鑰冩椂閽熷氨鏉ヨ嚜杩欓噷 鈥斺€?鑺墖鎷変綆 CLKREQ 璇锋眰鏃堕挓锛? * 鐢?PMIC 鐨?div_clk 杈撳嚭缁欏畠锛圕LKREQ 闂ㄦ帶鏄‖浠惰涓猴級銆? * 涓荤嚎 pm8150.dtsi 閲屾牴鏈病鏈夎繖涓妭鐐癸紝鎵€浠ヨ繖浜涙椂閽熶粠涓嶈緭鍑猴紝
+ * 鑺墖鎷夸笉鍒版椂閽?鈫?I2C 鑳?ACK 浣嗚鍥炲叏鏄?0銆? */
 &pm8150_0 {
 	pm8150_clkdiv: clock-controller@5b00 {
 		compatible = "qcom,spmi-clkdiv";
@@ -231,7 +223,7 @@
 	};
 };
 
-/* PM8150L 的分频时钟（可能是 NFC 的时钟源） */
+/* PM8150L 鐨勫垎棰戞椂閽燂紙鍙兘鏄?NFC 鐨勬椂閽熸簮锛?*/
 &spmi_bus {
 	pmic@4 {
 		pm8150l_clkdiv: clock-controller@5b00 {
@@ -248,7 +240,7 @@
 
 &i2c9 {
 	status = "okay";
-	/* SN100U �ϵ�������� 100kHz���ų������ʵ��µĲ���Ӧ */
+	/* SN100U 锟较碉拷锟斤拷锟斤拷锟斤拷锟?100kHz锟斤拷锟脚筹拷锟斤拷锟斤拷锟绞碉拷锟铰的诧拷锟斤拷应 */
 	clock-frequency = <100000>;
 
 	nfc: nq@28 {
@@ -256,16 +248,16 @@
 		reg = <0x28>;
 
 		interrupt-parent = <&tlmm>;
-		/* NXP NQ �?IRQ 必须用边沿触发：芯片数据没被读走时会把线一直拉高，
-	 * 用电平触发会造成中断风暴把系统卡死�?*/
+		/* NXP NQ 锟?IRQ 蹇呴』鐢ㄨ竟娌胯Е鍙戯細鑺墖鏁版嵁娌¤璇昏蛋鏃朵細鎶婄嚎涓€鐩存媺楂橈紝
+	 * 鐢ㄧ數骞宠Е鍙戜細閫犳垚涓柇椋庢毚鎶婄郴缁熷崱姝伙拷?*/
 		interrupts = <47 IRQ_TYPE_EDGE_RISING>;
 		interrupt-names = "nfc_irq";
 
 		enable-gpios = <&tlmm 103 GPIO_ACTIVE_HIGH>;
 		firmware-gpios = <&tlmm 48 GPIO_ACTIVE_HIGH>;
 
-		/* SN100U �Ĳο�ʱ������ PMIC �� ln_bb_clk3��19.2MHz����
-		 * CLKREQ һֱ���ͱ�ʾ������ʱ�ӣ�ûʱ��оƬ����ȫ����Ӧ NCI��
+		/* SN100U 锟侥参匡拷时锟斤拷锟斤拷锟斤拷 PMIC 锟斤拷 ln_bb_clk3锟斤拷19.2MHz锟斤拷锟斤拷
+		 * CLKREQ 一直锟斤拷锟酵憋拷示锟斤拷锟斤拷锟斤拷时锟接ｏ拷没时锟斤拷芯片锟斤拷锟斤拷全锟斤拷锟斤拷应 NCI锟斤拷
 		 */
 		clocks = <&pm8150_clkdiv 1>, <&pm8150_clkdiv 2>, <&pm8150l_clkdiv 1>;
 		clock-names = "nfc_clk", "nfc_clk2", "nfc_clk3";
@@ -275,9 +267,9 @@
 	};
 };
 
-/* ================= 音频：WCD9340（原�?tavil�?================= */
-/* 原厂接线：codec IRQ=GPIO123，复�?GPIO143（低有效复位，驱动自己控制）
- * 电源：vdd-buck/tx/rx/io = pm8150 S4�?.8V），vdd-vbat/3v3 = BOB
+/* ================= 闊抽锛歐CD9340锛堝師锟?tavil锟?================= */
+/* 鍘熷巶鎺ョ嚎锛歝odec IRQ=GPIO123锛屽锟?GPIO143锛堜綆鏈夋晥澶嶄綅锛岄┍鍔ㄨ嚜宸辨帶鍒讹級
+ * 鐢垫簮锛歷dd-buck/tx/rx/io = pm8150 S4锟?.8V锛夛紝vdd-vbat/3v3 = BOB
  */
 
 &tlmm {
@@ -375,10 +367,10 @@
 	};
 };
 
-/* ================= 声卡 ================= */
+/* ================= 澹板崱 ================= */
 
 
-/* secondary MI2S �?SD 线：原厂两路 SD0(GPIO128)/SD1(GPIO129)�? * 没有这个属�?q6afe �?sd_line_mask 就是 0，prepare �?-22�? */
+/* secondary MI2S 锟?SD 绾匡細鍘熷巶涓よ矾 SD0(GPIO128)/SD1(GPIO129)锟? * 娌℃湁杩欎釜灞烇拷?q6afe 锟?sd_line_mask 灏辨槸 0锛宲repare 锟?-22锟? */
 &q6afedai {
 	dai@22 {
 		reg = <QUATERNARY_MI2S_RX>;
@@ -449,7 +441,7 @@
 		platform { sound-dai = <&q6routing>; };
 	};
 
-	/* �?采集端口排查用：把另外几�?SLIM TX 端口也挂上同一�?codec 采集 DAI�?	 * 用来确认麦克风到底走的是哪个 AFE SLIM 端口�?026-10-21）�?	 */
+	/* 锟?閲囬泦绔彛鎺掓煡鐢細鎶婂彟澶栧嚑锟?SLIM TX 绔彛涔熸寕涓婂悓涓€锟?codec 閲囬泦 DAI锟?	 * 鐢ㄦ潵纭楹﹀厠椋庡埌搴曡蛋鐨勬槸鍝釜 AFE SLIM 绔彛锟?026-10-21锛夛拷?	 */
 	slimcap2-dai-link {
 		link-name = "SLIM Capture 2";
 		no-pcm;
@@ -466,20 +458,18 @@
 		platform { sound-dai = <&q6routing>; };
 	};
 
-	/* 扬声器：AFE secondary MI2S -> CS35L41 -> 喇叭 */
+	/* 鎵０鍣細AFE secondary MI2S -> CS35L41 -> 鍠囧彮 */
 	mi2s-spk-dai-link {
 		link-name = "SEC MI2S Playback";
 		no-pcm;
 
 		codec { sound-dai = <&speaker_amp 0>; };
-		cpu { sound-dai = <&q6afedai QUATERNARY_TDM_RX_0>; };
+		cpu { sound-dai = <&q6afedai QUATERNARY_MI2S_RX>; };
 		platform { sound-dai = <&q6routing>; };
 	};
 
-	/* 环回自检用：功放的 ASP TX 会把 ASPRX 收到的数据回显出来，
-	 * 用这条链路从 QUAT MI2S TX 采回来，就能在不接示波器的
-	 * 情况下确认 I2S 数据到底有没有送到功放。
-	 */
+	/* 鐜洖鑷鐢細鍔熸斁鐨?ASP TX 浼氭妸 ASPRX 鏀跺埌鐨勬暟鎹洖鏄惧嚭鏉ワ紝
+	 * 鐢ㄨ繖鏉￠摼璺粠 QUAT MI2S TX 閲囧洖鏉ワ紝灏辫兘鍦ㄤ笉鎺ョず娉㈠櫒鐨?	 * 鎯呭喌涓嬬‘璁?I2S 鏁版嵁鍒板簳鏈夋病鏈夐€佸埌鍔熸斁銆?	 */
 	quatcap-dai-link {
 		link-name = "QUAT MI2S Capture";
 		no-pcm;
@@ -491,7 +481,7 @@
 
 };
 
-/* q6asm-dai 需要子节点，否则报 "No dais found in DT" */
+/* q6asm-dai 闇€瑕佸瓙鑺傜偣锛屽惁鍒欐姤 "No dais found in DT" */
 &q6asmdai {
 	dai@0 { reg = <MSM_FRONTEND_DAI_MULTIMEDIA1>; };
 	dai@1 { reg = <MSM_FRONTEND_DAI_MULTIMEDIA2>; };
@@ -503,7 +493,7 @@
 	dai@7 { reg = <MSM_FRONTEND_DAI_MULTIMEDIA8>; };
 };
 
-/* apr 音频服务需要挂�?ADSP �?audio protection domain�? * 否则 q6asm �?buffer memory-map 会被 DSP 拒绝（error 1）�? * sdm845/sm8250 的主�?DT 都有这个属性，sm8150 �?dtsi 漏了�? */
+/* apr 闊抽鏈嶅姟闇€瑕佹寕锟?ADSP 锟?audio protection domain锟? * 鍚﹀垯 q6asm 锟?buffer memory-map 浼氳 DSP 鎷掔粷锛坋rror 1锛夛拷? * sdm845/sm8250 鐨勪富锟?DT 閮芥湁杩欎釜灞炴€э紝sm8150 锟?dtsi 婕忎簡锟? */
 &q6afe {
 	qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
 };
@@ -516,9 +506,9 @@
 	qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
 };
 
-/* ================= 扬声器功放：Cirrus CS35L41 =================
- * 原厂 DT：i2c@890000（主�?i2c4）地址 0x40，复�?GPIO89（低有效），
- * 中断 GPIO10（低电平）。主线有 cs35l41 驱动且已编成模块�? * 注意：只开这一条总线 —�?之前一次性打开所�?QUP 总线导致无法开机�? */
+/* ================= 鎵０鍣ㄥ姛鏀撅細Cirrus CS35L41 =================
+ * 鍘熷巶 DT锛歩2c@890000锛堜富锟?i2c4锛夊湴鍧€ 0x40锛屽锟?GPIO89锛堜綆鏈夋晥锛夛紝
+ * 涓柇 GPIO10锛堜綆鐢靛钩锛夈€備富绾挎湁 cs35l41 椹卞姩涓斿凡缂栨垚妯″潡锟? * 娉ㄦ剰锛氬彧寮€杩欎竴鏉℃€荤嚎 鈥旓拷?涔嬪墠涓€娆℃€ф墦寮€鎵€锟?QUP 鎬荤嚎瀵艰嚧鏃犳硶寮€鏈猴拷? */
 &i2c4 {
 	status = "okay";
 
@@ -527,15 +517,12 @@
 		reg = <0x40>;
 		#sound-dai-cells = <1>;
 
-		/* 主线 cs35l41 驱动假设复位是高有效：先拉低 2ms 再拉高释放�?		 * 原来按原厂语义写�?ACTIVE_LOW，逻辑 1 反而变成物理低�?		 * 等于一直按着复位，芯片永远等不到 OTP_BOOT_DONE�?		 */
+		/* 涓荤嚎 cs35l41 椹卞姩鍋囪澶嶄綅鏄珮鏈夋晥锛氬厛鎷変綆 2ms 鍐嶆媺楂橀噴鏀撅拷?		 * 鍘熸潵鎸夊師鍘傝涔夊啓锟?ACTIVE_LOW锛岄€昏緫 1 鍙嶈€屽彉鎴愮墿鐞嗕綆锟?		 * 绛変簬涓€鐩存寜鐫€澶嶄綅锛岃姱鐗囨案杩滅瓑涓嶅埌 OTP_BOOT_DONE锟?		 */
 		VA-supply = <&vreg_s4a_1p8>;
 		VP-supply = <&vreg_bob>;
 
-		/* ★ 不要给 MI2S 引脚配 pinctrl：GPIO126-129（secondary MI2S）
-		 * 是 bootloader/TrustZone 保留的（其他 sm8150 板子 DT 都写着
-		 * gpio-reserved-ranges = <126 4>），Linux 一 request 就 -EINVAL，
-		 * 导致功放 probe 失败、声卡注册不出来。这些引脚已由 ABL 复用好。
-		 */
+		/* 鈽?涓嶈缁?MI2S 寮曡剼閰?pinctrl锛欸PIO126-129锛坰econdary MI2S锛?		 * 鏄?bootloader/TrustZone 淇濈暀鐨勶紙鍏朵粬 sm8150 鏉垮瓙 DT 閮藉啓鐫€
+		 * gpio-reserved-ranges = <126 4>锛夛紝Linux 涓€ request 灏?-EINVAL锛?		 * 瀵艰嚧鍔熸斁 probe 澶辫触銆佸０鍗℃敞鍐屼笉鍑烘潵銆傝繖浜涘紩鑴氬凡鐢?ABL 澶嶇敤濂姐€?		 */
 		pinctrl-names = "default";
 		pinctrl-0 = <&quat_mi2s_active>;
 
@@ -546,27 +533,42 @@
 		cirrus,boost-peak-milliamp = <4000>;
 		cirrus,boost-ind-nanohenry = <1000>;
 		cirrus,boost-cap-microfarad = <15>;
-		/* 原厂�?cirrus,gpio-config2: gpio-src-select=4 + output-enable */
+		/* 鍘熷巶锟?cirrus,gpio-config2: gpio-src-select=4 + output-enable */
 		cirrus,gpio2-src-select = <4>;
 		cirrus,gpio2-output-enable;
 	};
 };
 
-/* 扬声器功放的音频输入：secondary MI2S（原�?gpio126-129�?*/
+/* 鎵０鍣ㄥ姛鏀剧殑闊抽杈撳叆锛歴econdary MI2S锛堝師锟?gpio126-129锟?*/
 &tlmm {
-	/* 扬声器走的是 secondary MI2S（GPIO126-130），不是 quaternary。
-	 * 之前用 qua_mi2s 的引脚（136-140），结果功放拿不到位时钟、PLL 锁不上、
-	 * 上电超时 -110。
-	 */
-	/* 扬声器功放的 I2S = QUATERNARY MI2S（gpio136 SCLK / 137 WS / 138-140 SD）。
-	 * 证据：用 QUATERNARY 时功放的 PLL 能锁定（PLL_LOCK=1），
-	 * 而 secondary MI2S 的 gpio126-129 开机后是 MUX UNCLAIMED，
-	 * 且一复用就死机（TZ 保护）—— 那几根线不是音频用的。
-	 */
+	/* 鎵０鍣ㄨ蛋鐨勬槸 secondary MI2S锛圙PIO126-130锛夛紝涓嶆槸 quaternary銆?	 * 涔嬪墠鐢?qua_mi2s 鐨勫紩鑴氾紙136-140锛夛紝缁撴灉鍔熸斁鎷夸笉鍒颁綅鏃堕挓銆丳LL 閿佷笉涓娿€?	 * 涓婄數瓒呮椂 -110銆?	 */
+	/* 鎵０鍣ㄥ姛鏀剧殑 I2S = QUATERNARY MI2S锛坓pio136 SCLK / 137 WS / 138-140 SD锛夈€?	 * 璇佹嵁锛氱敤 QUATERNARY 鏃跺姛鏀剧殑 PLL 鑳介攣瀹氾紙PLL_LOCK=1锛夛紝
+	 * 鑰?secondary MI2S 鐨?gpio126-129 寮€鏈哄悗鏄?MUX UNCLAIMED锛?	 * 涓斾竴澶嶇敤灏辨鏈猴紙TZ 淇濇姢锛夆€斺€?閭ｅ嚑鏍圭嚎涓嶆槸闊抽鐢ㄧ殑銆?	 */
 	quat_mi2s_active: quat-mi2s-active {
-		pins = "gpio136", "gpio137", "gpio138", "gpio139", "gpio140";
+		pins = "gpio136", "gpio137", "gpio138", "gpio139", "gpio140", "gpio141", "gpio142";
 		function = "qua_mi2s";
 		drive-strength = <8>;
 		bias-disable;
 	};
+};
+
+/* ==========================================================================
+ * 2026-10-22 鎵０鍣ㄤ慨澶嶈ˉ涓侊紙渚濇嵁涓荤嚎宸插悎鍏ヤ笖鐪熸満鍙敤鐨?sm8150-xiaomi-nabu.dts锛? *
+ * 1) QUAT TDM 鐨?6 涓抚鍙傛暟鍏ㄩ儴缂哄け -> q6afe 閲?of_property_read_u32 鍏ㄥけ璐ワ紝
+ *    sync_mode/sync_src/data_out/invert_sync/data_delay/data_align 鍏ㄤ负 0銆? *    瀹炴祴锛欰FE 绔彛鑳借捣銆丼CLK 12.288MHz銆佸姛鏀?PLL 閿併€佸瘎瀛樺櫒鍏ㄥ锛? *          浣嗗姛鏀句竴涓湁鏁堟暟鎹兘鏀朵笉鍒帮紙妲戒綅 0~7 + 鎵€鏈夋瀬鎬?甯ф牸寮忕粍鍚堝叏闈欓煶锛夈€? *    nabu 涓婃槸 1/1/0/1/1/0锛岃繖閲岀収鎶勩€? *
+ * 2) cirrus,asp-sdout-hiz 缂哄け锛歯abu 璁?<3>锛屼富绾块粯璁ゅ啓 0x02銆? * ========================================================================== */
+&q6afedai {
+	dai@72 {
+		reg = <QUATERNARY_TDM_RX_0>;
+		qcom,tdm-sync-mode = <1>;
+		qcom,tdm-sync-src = <1>;
+		qcom,tdm-data-out = <0>;
+		qcom,tdm-invert-sync = <1>;
+		qcom,tdm-data-delay = <1>;
+		qcom,tdm-data-align = <0>;
+	};
+};
+
+&speaker_amp {
+	cirrus,asp-sdout-hiz = <3>;
 };

@@ -240,3 +240,92 @@ libc++abi: terminating due to uncaught exception of type std::bad_alloc
 
 > 这也是为什么公开镜像从 10 GB 缩到 **4 GB**：既省内存又省下载流量
 > （压缩后 1.01 GiB），首次开机照样自动扩到 110 GB。
+
+---
+
+# ★ 刷 rootfs（userdata / sda31）—— 2026-10-22 实测成功
+
+仓库原来的线刷包**不含 rootfs**，需要"重装 Ubuntu base"。这里记录一个已在真机验证的
+完整方法：把 rootfs 备份包做成 ext4 镜像，用 `fastboot flash userdata` 整块写入。
+
+## 什么时候用
+
+- 系统被折腾乱了、`/etc` 残留文件导致服务起不来（例如 sshd 在 banner 阶段就断开）
+- 想要"完整空白"的重装，而不是覆盖式还原
+
+**为什么覆盖式还原不够**：`tar -x` 只覆盖归档里的文件，**归档之后新增的文件不会被删除**。
+如果之后升级过库（`apt install`），新版 `.so` 会留下，和旧二进制不匹配
+（实测症状：sshd 起来但连接在 `kex_exchange_identification` 阶段被关闭）。
+要真正干净，必须整块重写分区。
+
+## 步骤
+
+### 1. 在 WSL 里解包归档
+
+```bash
+mkdir -p /root/newroot
+zstd -dc /mnt/c/Users/MAO/Desktop/小米9移植linux/wifi-bringup/backups/golden-wifi-r2/rootfs-r2.tar.zst \
+  | tar -x --numeric-owner -C /root/newroot
+du -sh /root/newroot        # 实测 7.6G
+```
+
+### 2. 直接生成 ext4 镜像（不需要 loop mount）
+
+`mke2fs 1.47` 支持 `-d <dir>`，一步把文件树写进镜像：
+
+```bash
+truncate -s 12G /root/userdata.img
+mkfs.ext4 -F -L userdata -m 0 -d /root/newroot /root/userdata.img
+# 实测 54 秒
+```
+
+> 镜像只要装得下就行，**不用等于分区大小**。开机后 systemd 会自动
+> `growfs` 把文件系统扩到整个 110G 分区（实测 12G 镜像 → 开机后 `df` 显示 110G）。
+
+### 3. 复制到 Windows 侧
+
+```bash
+cp /root/userdata.img /mnt/c/Users/MAO/AppData/Local/Temp/userdata.img   # 2 分钟
+```
+
+### 4. 刷入
+
+```powershell
+fastboot devices
+fastboot getvar partition-type:userdata     # 应回 ext4
+fastboot flash userdata C:\Users\MAO\AppData\Local\Temp\userdata.img
+# 实测 5.5 分钟（fastboot 自动按 sparse 分片传输）
+fastboot reboot
+```
+
+### 5. 验证
+
+```sh
+ssh mi9-usb 'systemctl is-system-running; systemctl --failed'
+# running，无失败服务
+find /root /usr/local /opt /home -xdev -newermt "2026-10-20" -type f | wc -l
+# 0 —— 确实是干净的
+df -h /
+# 110G，用了 7.4G
+```
+
+## 注意事项
+
+- **配套镜像要一起刷**：rootfs 与 `kernelfat`（内核+模块）、`boot`（UEFI+DTB）必须是同一版本，
+  否则模块 vermagic 不匹配。本次刷的是 `backups/golden-20261019-1504/` 那套（payload `2026-10-19-srv8`）
+- `fastboot flash userdata` 会**清空全部用户数据**（包括 WiFi 口令、SSH 公钥、
+  所有装过的软件）——归档里带着 10-19 那一刻的 WiFi 配置和公钥，所以开机后还能直接登录
+- 刷之前确认 fastboot 的 `partition-type:userdata` 是 `ext4`（本机实测是）
+- 镜像里不要放大的临时文件（例如备份的 `.tar.zst` 本身），会白占空间
+
+## 本次实测结果（2026-10-22 23:43）
+
+```
+systemd: running，0 个失败服务
+载荷: 2026-10-19-srv8
+残留文件: 0
+WiFi: 能上外网；USB: 169.254.42.1 + 192.168.2.2
+磁盘: 110G / 用 7.4G
+蓝牙 hci0: UP，66 个模块
+密码/公钥: 保留（能 SSH 登录）
+```

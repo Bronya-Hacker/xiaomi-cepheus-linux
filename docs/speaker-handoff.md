@@ -320,3 +320,188 @@ DSP 实时限制振幅**。DSP 不跑时功放很可能出于保护**直接把�
 
 `docs/audio.md` 的「追加 32~35」有完整逐日记录。关键提交：
 `4e4ed3f`、`6df17f3`、`e0f63f6`、`6a8cf24`、`7a166dc`
+
+---
+
+# 追加（2026-10-22 21:45，本轮实测结果 —— 已刷入设备）
+
+## 结论：路线纠正 —— 厂商走的是 QUAT MI2S，不是 TDM
+
+厂商 `/vendor/etc/audio_platform_info.xml` + `mixer_paths_tavil.xml`（挂 `/dev/sde53` 可直接读）：
+
+```xml
+<device name="SND_DEVICE_OUT_SPEAKER" backend="speaker" interface="QUAT_MI2S_RX"/>
+<device name="SND_DEVICE_OUT_SPEAKER" bit_width="24"/>
+<param key="mono_speaker" value="left"/>
+<path name="deep-buffer-playback speaker">
+    <ctl name="QUAT_MI2S_RX Audio Mixer MultiMedia1" value="1" />   <!-- 只有这一条 -->
+</path>
+```
+→ 标准 I2S、24bit、**单声道取左声道**；扬声器路径里没有任何 CS35L41 控件（全由 DAPM 负责）。
+之前照 `map220v/sm8150-mainline` 改 TDM 8 槽是走偏了。
+
+## 真正的参考实现（就在本内核树里）
+
+`arch/arm64/boot/dts/qcom/sm8150-xiaomi-nabu.dts` —— 小米平板5，同 SM8150 + 同款 CS35L41 **×4**，主线已合入。它走 TDM，关键配置：
+
+```dts
+&q6afedai { dai@72 { reg = <QUATERNARY_TDM_RX_0>;
+	qcom,tdm-sync-mode = <1>; qcom,tdm-sync-src = <1>; qcom,tdm-data-out = <0>;
+	qcom,tdm-invert-sync = <1>; qcom,tdm-data-delay = <1>; qcom,tdm-data-align = <0>; }; };
+cirrus,asp-sdout-hiz = <3>;                 /* 主线默认 0x02 */
+pinctrl: gpio137+gpio138 (output-high) + gpio140(=SD1)   /* ★ 注意用 SD1，不是 SD0 */
+```
+
+## 已实测排除（客观证据，别再重复）
+
+| 项 | 证据 |
+|---|---|
+| 功放寄存器配置 | 全部正确：GLOBAL_EN=1、AMP_EN=1、BST_EN=2、Class-H 开、未静音、Digital PCM=+12dB 满格 |
+| 音量 | ALSA `Digital PCM Volume` min=0(静音)/max=913(+12dB)，当前 = 最大值 |
+| boost | `BST_EN` 在 `PWR_CTRL2`（=0x21，值 2=使能），不是 PWR_CTRL1 —— 早先怀疑 boost 关断是误判 |
+| 时钟 | `PLL_CLK_CTRL` 参考频率码：TDM 时 51(12.288M)、MI2S 时 33(3.072M)，PLL_LOCK=1 → **SCLK 真的在跑且频率正确** |
+| TDM 槽位 | 槽 0~7 全扫，无任何声音（含爆音） |
+| 帧格式/极性 | DSP_A/I2S × SCLK/LRCLK 反相 共 6 组合 × 槽 6/0，全静音 |
+| TDM 帧参数 | 已按 nabu 补上 6 个 `qcom,tdm-*`（DTS 里）→ 仍静音 |
+| ASP_CONTROL4 | 厂商 revB0 errata 里确实有 `0x01010000`，已修到 revb0 数组并刷入 → 仍静音 |
+| `matrix_map ret=998` | **不是错误**：上游把 `wait_event_timeout` 剩余 jiffies 当返回值返回，998=成功 |
+| ADSP | remoteproc 状态 running，无 SMMU fault |
+
+## 本轮已落地的修改（都已编译并刷入）
+
+`dts/cepheus-cam-ir-nfc.dtsi`
+1. 播放 DAI link：`QUATERNARY_TDM_RX_0` → **`QUATERNARY_MI2S_RX`**
+2. 补 nabu 的 6 个 `qcom,tdm-*`（dai@72，留作 TDM 分支备用）
+3. 补 `cirrus,asp-sdout-hiz = <3>`
+
+`sound/soc/qcom/sm8150.c`
+4. AFE 位时钟：`1536000` 写死 → `fs×32×声道数`（48k/2ch = 3.072MHz）
+5. codec SCLK 参考频率同步 `fs×32×ch`（原来只 ×32，2 声道时错一半）
+6. `case SECONDARY_MI2S_*` 补 `break`（原来贯穿到 QUAT 分支，给 QUAT 设了 SEC 的 ibit）
+7. BE fixup 对 QUAT MI2S 也放开 S24_LE
+
+`sound/soc/codecs/cs35l41-lib.c`
+8. `{ CS35L41_ASP_CONTROL4, 0x01010000 }` 从 reva0 移到 **revb0** errata（原来在 A0 数组 → B0 芯片永不执行）
+
+现在 MI2S 链路已完全跑通：`I2SDBG id=22 bits=24 ch=2 sd_mask=0x1` + `AFEDBG port_start port_id=0x1006`，
+功放 `SP_FORMAT=0x18180200`(默认 I2S)、RXSLOT=0x100(槽 0=左声道)、RX_WL=24、PLL_LOCK=1。
+**但扬声器依然完全静音（连底噪都没有）。**
+
+## 关键推理（下一步的出发点）
+
+完全静音、连爆音都没有 → 功放 SDIN 上收到的是**恒零数据**，而不是悬空/错位（那样会有嘶嘶声）。
+所以问题在 AFE 有没有把非零样本送上 SD 线，而不在功放。
+
+## 下一步（按性价比）
+
+1. **扫 AFE 数据线 SD0~SD3**（现在 MI2S 路径下 `sd_line_override` 才真正生效；TDM 路径改它无效，
+   这就是之前"扫过 0/1/2/3 全无声"其实是空转的原因）：
+   `echo N > /sys/module/q6afe_dai/parameters/sd_line_override` 后重放。
+   ★ nabu 工作配置用的是 **SD1(gpio140)**，cepheus 的 dts 里 `qcom,sd-lines = <0>`(SD0) —— 很可能就是这条。
+2. **示波器**量 gpio139(SD0)/gpio140(SD1)：判断 AFE 到底驱动了哪根线、线有没有波形。
+3. 麦克风那侧"精确为零"是独立问题（SLIM 数据面），别和扬声器混在一起查。
+
+## 环境备忘（本轮新增，很有用）
+
+- **可以绕过驱动直接读写功放寄存器**（不用改内核，不用重启）：
+  `i2ctransfer -f -y 0 w4@0x40 0x00 0x00 0x60 0x00 r4`（读 0x6000）
+  `i2ctransfer -f -y 0 w8@0x40 <4字节地址> <4字节数据>`（写）
+  ★ debugfs 的 `regmap/0-0040/registers` 读值和 raw i2c **对不上**，判断状态一律用 raw i2c。
+- **播放在放时不能同时录音**：legacy ASM 只允许一个 client（`Audio Client already active` → `q6asm_open_write` 失败）。做回环实验要串行。
+- 换内核不用刷 boot：`/dev/sda28`(FAT16, 64MB, 挂 `/mnt/kernelfat`) 里就是 `Image`；
+  FAT 只剩 19MB，必须先 `rm` 旧 Image 再 `cp`（备份在 `/root/Image.bak`）。
+- 刷 boot（DTB/FdtBlob 变更才需要）：设备上 `mi9-flash boot <img>`，自动备份到 `/var/backups/mi9-flash/`。
+- 构建：WSL `bash scripts/02-build-kernel.sh /root/build/linux`，
+  然后 `bash scripts/03-build-edk2.sh /root/build/edk2-msm out/sm8150-xiaomi-cepheus.dtb`（产物 `out/boot-cepheus.img`）。
+- 厂商驱动 `.ko` 有完整符号表，可以直接挖它的寄存器表（本轮就是这么找到 ASP_CONTROL4 的）：
+  `llvm-objcopy -O binary --only-section=.rodata audio_cs35l41.ko ro.bin` 然后按 8 字节一组扫 {寄存器,值}。
+
+## 追加 2（2026-10-22 22:10）
+
+### SSH 走 WiFi（重要）
+
+USB 口要插耳机/转接头时，USB-NCM 的 SSH 会断，改用 WiFi：
+
+```
+ssh mi9          # 192.168.31.177, hostname umeko-device, ath10k
+```
+两条路都在 `~/.ssh/config` 里，随时可切。
+
+### 交叉验证：WCD9340 通路（未完成，别下错误结论）
+
+想用"同一首歌送到 WCD9340 听筒/耳机"来判定 DSP 数据面是否正常，但**第一次测试无效**：
+DAPM 里 `EAR: Off  in 0 out 1`、`EAR PA: Off`、`HPHL/HPHR: Off` —— 输出级根本没通电，所以"没声音"不说明任何问题。
+
+已确认的厂商事实：
+```xml
+<path name="deep-buffer-playback headphones">
+    <ctl name="SLIMBUS_6_RX Audio Mixer MultiMedia1" value="1" />   <!-- 是 SLIMBUS_6_RX，不是 0 -->
+</path>
+```
+主线这张卡上 `SLIMBUS_6_RX Audio Mixer MultiMedia1` 控件存在，但代码里的 BE link 未必有 SLIMBUS_6_RX
+（DTS 里只有 SLIMBUS_0_TX/1_TX/2_TX 采集链路），所以 codec AIF 没起来 → DAPM 输出级永远 Off。
+**要让这个交叉验证成立，得先给 DTS 加一条 `SLIMBUS_6_RX` 的 no-pcm 播放 BE link。**
+
+### 当前最可靠的两个待办
+
+1. **示波器量 gpio139 / gpio140**（播放时）—— 一次定性 AFE 到底有没有把数据送上 SD 线。
+2. 或者补 `SLIMBUS_6_RX` BE link，用 WCD9340 耳机做数据面交叉验证（需要 USB-C→3.5mm 转接头，SSH 走 WiFi）。
+
+### 本轮已刷入的最终状态
+
+- 播放走 `QUATERNARY_MI2S_RX`（I2S/24bit/槽 0），`port_start port_id=0x1006`，`sd_mask=0x1`
+- 功放 `SP_FORMAT=0x18180200`、`RXSLOT=0x100`、`RX_WL=24`、`ASP_CONTROL4=0x01010000`、`PLL_LOCK=1`
+- 数据线 SD0~SD3 全部实测无声音
+- 备份：`/root/Image.bak`（旧内核）、`/root/boot.bak.img`（旧 boot 前 8MB）、`/var/backups/mi9-flash/boot.20261022-211644.img`
+
+## 追加 3（2026-10-22 22:35）—— DSP 数据面已证明正常，问题只在 MI2S→功放这一段
+
+### 决定性交叉验证（意外发现）
+
+用户插 **USB-C 模拟耳机**（不是 USB 声卡：`/proc/asound/cards` 仍然只有 card 0，
+`snd-usb-audio` 只加载驱动没枚举出卡），**耳机能正常放歌**。这条声音走的是：
+
+```
+pw-play → card0 pcm0p → ASM → ADM → AFE(SLIMBUS_0_RX, port 0x4000) → SLIMbus → WCD9340 耳放
+```
+
+→ **Q6 ADSP 的数据面是好的**，之前"麦克风精确为 0"是 SLIM/TX 侧的另一件事，不是全局坏。
+（耳机通路由 `amixer -c0 cset name='SLIMBUS_0_RX Audio Mixer MultiMedia1' 1` 打开，重启后需重设。
+  注：DAPM 里 HPHL/HPHR 显示 Off 但实际有声 —— wcd934x 驱动里有个 `SLIMSKIP` 的旁路 hack，别再用 DAPM 状态判断耳机路。）
+
+### 新发现的引脚事实（重要）
+
+`qua_mi2s` 函数在 SM8150 上覆盖 **gpio136~142 共 7 根**（MCLK/SCK/WS/SD0/SD1/SD2/SD3），
+不是 5 根。之前 dts 只 mux 了 136-140，所以 **gpio141/142(SD2/SD3) 是 `MUX UNCLAIMED`**，
+"SD2/SD3 也静音"是假象。已把 dts 改成 136..142 七个引脚并刷入（实测 7 根全部 `function qua_mi2s`）。
+
+### 但结果：SD0~SD3 全部仍然静音（已确认三遍，音量最大）
+
+配合此前的证据，可以确定：
+
+| 环节 | 状态 |
+|---|---|
+| Q6 DSP → ADM → AFE | ✅ 用 USB-C 耳机证明是通的 |
+| AFE QUAT MI2S 端口 0x1006 | ✅ 启动成功（`I2SDBG id=22 bits=24 ch=2 sd_mask=0x1`） |
+| MI2S 引脚复用 | ✅ gpio136-142 全部 qua_mi2s |
+| SCLK | ✅ 功放 PLL 锁在 3.072MHz（refclk 码 33）|
+| 播放路由控件 `QUAT_MI2S_RX Audio Mixer MultiMedia1` | ✅ 存在且使能（否则 BE 端口不会 start）|
+| 功放 DAPM/寄存器 | ✅ SPK/Main AMP/CLASS H/ASPRX1/AMP Playback 全 On，SP_ENABLES=0x10000，DAC src=ASP |
+| SD0/SD1/SD2/SD3 逐根试 | ❌ 全部无声 |
+| 帧格式/极性/槽位/音量/boost/ASP_CONTROL4 | ❌ 全部试过无效 |
+
+### 剩下的只能是硬件层
+
+到这一步，软件能控的变量已经穷尽。要么 AFE 的 MI2S 数据引脚在**硅片内部**没真正驱动
+（`q6afe_i2s_port_prepare` 的 `channel_mode` 只影响 RX 输入选择，不影响 TX 输出线 —— 这个假设需要用示波器验证），
+要么功放的 SDIN 不在 gpio139~142 这四根上（改板/走线不同）。
+
+**下一步必须实测：**
+1. 示波器量 gpio139/140/141/142（播放时）—— 有波形说明 AFE 在发数据，问题在功放/喇叭；都没波形说明 AFE 数据线有更深的问题。
+2. 或者：让设备进 Android 放歌，用另一台 Linux 设备/逻辑分析仪抓功放 I2C 上电序列，逐条和主线对比（这是唯一还没做的"金标准"对比）。
+
+### 本次会话所有已刷入的改动（可复现）
+
+- DTS：播放链路改 QUAT MI2S RX、补 6 个 `qcom,tdm-*`、`cirrus,asp-sdout-hiz=<3>`、pinctrl 扩到 gpio136-142
+- sm8150.c：AFE ibit=fs×32×ch、codec SCLK 同步 ×ch、SECONDARY 分支补 break、MI2S 允许 S24_LE
+- cs35l41-lib.c：ASP_CONTROL4 移到 revB0 errata
