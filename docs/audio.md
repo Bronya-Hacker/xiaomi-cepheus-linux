@@ -1791,3 +1791,58 @@ CS35L41 的 PLL 需要参考时钟，没有 MCLK 就锁不上、上电超时。
 2. 查 GPIO126/127/128 被判 reserved 的来源（`gpiochip_line_is_valid` 返回假），
    原厂是能从 Linux mux 这几根线的
 3. 之后 Enable 应能成功，喇叭出声
+
+---
+
+## 追加33：扬声器继续深挖（2026-10-22 16:45）
+
+### 又修掉两个
+
+**bug 4：I2S 主从方向搞反了**
+
+```c
+unsigned int fmt = ... | SND_SOC_DAIFMT_CBP_CFP;            /* codec 提供时钟 → CPU 从机 */
+unsigned int codec_dai_fmt = ... | SND_SOC_DAIFMT_CBC_CFC;  /* codec 从机 */
+```
+
+两边都声明成从机 → 谁都不输出 BCLK。改成 CPU 做主机（`CBC_CFC`）。
+
+**bug 5：从来没有配置过 CS35L41 的 PLL**
+
+对照 Intel 板级（`sof_cirrus_common.c`）的标准做法，机器驱动必须做：
+
+```c
+snd_soc_dai_set_sysclk(codec_dai, CS35L41_CLKID_SCLK, bclk, SND_SOC_CLOCK_IN);
+snd_soc_component_set_sysclk(codec_dai->component, CS35L41_CLKID_SCLK, 0,
+                             bclk, SND_SOC_CLOCK_IN);
+```
+
+`bclk = 48000 × 32 × 2 = 3072000`（正好在驱动的 `cs35l41_pll_sysclk[]` 表里，0x21）。
+
+不做的话功放的 PLL 完全没有参考频率，`PUP_DONE` 永不置位：
+
+```
+Enable(1) failed: -110  STATUS1=0x00400000
+STATUS4=0x00000003      ← bit1 = OTP_BOOT_DONE 置位（芯片本身启动正常）
+STATUS3=0x20000080      ← bit1 = PLL_LOCK 为 0
+```
+
+加上之后 `CS35L41 SCLK set to 3072000 Hz (ret 0)`，但 **PUP_DONE 仍不置位**，
+Enable 依然 -110。
+
+### 已经排除的
+
+| 尝试 | 结果 |
+|---|---|
+| I2S 主从方向 | 已修正 |
+| AFE 位时钟使能（`SEC_MI2S_IBIT`） | 已加 |
+| CS35L41 PLL 参考频率（SCLK 3.072MHz） | 已加，ret=0 |
+| 厂商 DSP 固件 | 已在 `/lib/firmware`，加载仍 -5（非致命） |
+| boost 参数（4000mA / 1.0uH / 15uF） | DT 与原厂一致 |
+| 引脚复用 | GPIO126-129 被 TZ 硬保护，一写就死机（已确认） |
+
+### 下一步需要硬件信息
+
+- **示波器测 GPIO126（SCLK）**：确认 AFE 到底有没有输出位时钟
+- 或**反汇编厂商 HAL**：看它在播放前对 MI2S 引脚/时钟/功放做了什么（厂商能写那几根线）
+- 或确认 CS35L41 在这个硬件上是否还需要 MCLK（GPIO130），而 AFE 是否驱动它
