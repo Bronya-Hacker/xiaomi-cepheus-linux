@@ -472,7 +472,7 @@
 		no-pcm;
 
 		codec { sound-dai = <&speaker_amp 0>; };
-		cpu { sound-dai = <&q6afedai SECONDARY_MI2S_RX>; };
+		cpu { sound-dai = <&q6afedai QUATERNARY_MI2S_RX>; };
 		platform { sound-dai = <&q6routing>; };
 	};
 
@@ -523,6 +523,9 @@
 		 * gpio-reserved-ranges = <126 4>），Linux 一 request 就 -EINVAL，
 		 * 导致功放 probe 失败、声卡注册不出来。这些引脚已由 ABL 复用好。
 		 */
+		pinctrl-names = "default";
+		pinctrl-0 = <&quat_mi2s_active>;
+
 		reset-gpios = <&tlmm 89 GPIO_ACTIVE_HIGH>;
 		interrupt-parent = <&tlmm>;
 		interrupts = <10 IRQ_TYPE_LEVEL_LOW>;
@@ -542,9 +545,14 @@
 	 * 之前用 qua_mi2s 的引脚（136-140），结果功放拿不到位时钟、PLL 锁不上、
 	 * 上电超时 -110。
 	 */
-	sec_mi2s_active: sec-mi2s-active {
-		pins = "gpio126", "gpio127", "gpio128", "gpio129";
-		function = "sec_mi2s";
+	/* 扬声器功放的 I2S = QUATERNARY MI2S（gpio136 SCLK / 137 WS / 138-140 SD）。
+	 * 证据：用 QUATERNARY 时功放的 PLL 能锁定（PLL_LOCK=1），
+	 * 而 secondary MI2S 的 gpio126-129 开机后是 MUX UNCLAIMED，
+	 * 且一复用就死机（TZ 保护）—— 那几根线不是音频用的。
+	 */
+	quat_mi2s_active: quat-mi2s-active {
+		pins = "gpio136", "gpio137", "gpio138", "gpio139", "gpio140";
+		function = "qua_mi2s";
 		drive-strength = <8>;
 		bias-disable;
 	};

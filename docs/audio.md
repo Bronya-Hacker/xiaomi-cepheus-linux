@@ -1864,3 +1864,74 @@ Enable 依然 -110。
 
 下一步要么查数据手册里 bit22 的含义，要么和厂商的 `audio_cs35l41.ko` 行为对比，
 要么用示波器测 GPIO126 确认 AFE 是否真的输出位时钟。
+
+---
+
+## 追加34：找到了正确的 MI2S，功放终于能上电（2026-10-22 18:50）
+
+### 决定性证据：厂商自己的配置文件
+
+`/vendor/etc/audio_platform_info.xml`：
+
+```xml
+<device name="SND_DEVICE_OUT_SPEAKER" backend="speaker" interface="QUAT_MI2S_RX"/>
+```
+
+`/vendor/etc/mixer_paths_tavil.xml`：
+
+```xml
+<path name="deep-buffer-playback speaker">
+    <ctl name="QUAT_MI2S_RX Audio Mixer MultiMedia1" value="1" />
+</path>
+```
+
+**`QUAT_MI2S_RX` 出现 41 次，`SEC_MI2S` 一次都没有。**
+
+之前一路找 secondary MI2S 是错的 —— 那个 `sec_mi2s_active` 状态在厂商 DT 里
+**定义了但从未被引用**，而 GPIO126-129 是留给别的外设的（TZ 保护，一写就死机）。
+
+### 改对之后：功放首次成功上电
+
+```dts
+cpu { sound-dai = <&q6afedai QUATERNARY_MI2S_RX>; };
+pinctrl-0 = <&quat_mi2s_active>;   /* gpio136-140, function qua_mi2s */
+```
+
+```
+I2SDBG id=22 rate=48000 bits=16 ch=2 sd_mask=0x1
+AFEDBG port_start idx=4102 port_id=0x1006
+cs35l41: OKDBG Enable(1) ok  S3=0x2000003e  PLL_LOCK=1     ← 第一次
+RTDBG stream_open fe=0 stream=1 port_id=22 rate=48000 ch=2 copps=1
+RTDBG matrix_map ret=998      （wait_event_timeout 的剩余 jiffies，正数=成功）
+```
+
+### 又补的两处
+
+1. **机器驱动完全没有 DAPM 部件/路由** → codec 的 `SPK` 悬空。
+   在 probe 里加了 `SND_SOC_DAPM_SPK("Speaker")` + 路由 `{"Speaker", NULL, "SPK"}`。
+2. **`cs35l41_dsp_audio_ev` 在 DSP 加载失败时返回错误** → `DSP1` 部件永远 Off。
+   改成失败也放行（DAC 源已经是 ASP 直通，不经过 DSP 也能出声）。
+
+### 现在的完整状态（播放中实测）
+
+```
+AMP Playback: On     ASPRX1: On (SP_ENABLES bit16)
+PCM Source  : On     值 = ASP(0x8)
+Main AMP    : On     CLASS H: On     SPK: On
+功放寄存器：GLOBAL_EN=1 PLL_LOCK=1 OUT_MUTE=0 RX_WL=16
+           DAC_PCM1_SRC=0x8(ASP) SP_FORMAT=0x10180200 RXSLOT=1
+引脚：gpio136-140 全部 function=qua_mi2s
+```
+
+**软件侧已经完全正确，但功放依然不出声。**
+
+### 剩下唯一的未知
+
+数据是否真的到了 ASP 的 SD 引脚上。可能原因：
+
+- AFE 的 SD 线映射和功放实际接的那根不一致（试过 sd_mask 0x1/0x2/0x4/0x8）
+- I2S 帧格式细节（槽宽/对齐）与功放期望不符
+- CS35L41 的 `SP_FORMAT=0x10180200` 位含义需要数据手册才能确认
+
+下一步需要：**示波器测 gpio138（SD0）**，或 CS35L41 数据手册，
+或反汇编厂商 `audio_cs35l41.ko` 的 set_fmt/寄存器初始化序列做逐位对比。
