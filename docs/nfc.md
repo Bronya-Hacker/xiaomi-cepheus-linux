@@ -651,3 +651,53 @@ journalctl -u mi9-nfcd -f           # 实时看贴卡结果
    服务常驻，所以只需初始化一次，无实际影响。
 2. **只读 UID，不读扇区**：要读 MIFARE 块数据需要额外发
    RF 数据交换命令（`NFC_CMD_VENDOR` 或直接下发 NCI 数据帧）。
+
+---
+
+# ★★★★★★★ 与 PC 读卡器交叉验证：完全一致（2026-10-22 08:30）
+
+用 libnfc 的 `nfc-list` 在电脑上读同一张卡：
+
+```
+启动扫描卡片……
+nfc-list 使用 libnfc 版本 1.7.1
+NFC设备: NFC-Device 已打开
+1 个 ISO14443A（常见IC卡） 被动目标已发现:
+ISO/IEC 14443A (106 kbps) target:
+    ATQA (SENS_RES): 00  04
+       UID (NFCID1): bc  33  55  81
+      SAK (SEL_RES): 08
+[Found targets=1]
+```
+
+对比手机（`journalctl -u mi9-nfcd`）：
+
+```
+★ 卡片 UID = BC 33 55 81   (SENS_RES=0004 SEL_RES=08 协议=2)
+```
+
+| 字段 | PC 读卡器 | 小米9 主线 Linux | 一致 |
+|---|---|---|---|
+| UID (NFCID1) | `bc 33 55 81` | `BC 33 55 81` | ✅ |
+| ATQA (SENS_RES) | `00 04`（即 0x0004） | `0004` | ✅ |
+| SAK (SEL_RES) | `08` | `08` | ✅ |
+
+**三个字段全部精确吻合**，证明：
+1. 手机读到的不是随机/伪造数据
+2. 位序、字节序处理都正确
+3. NCI 帧解析（SENS_RES / NFCID1 / SEL_RES）完全按规范
+
+`UID` 以 `BC` 开头 + `SAK=08` → 国产 CUID 可改写卡（MIFARE Classic 1K），
+门禁/饭卡常见类型，与读到的属性完全自洽。
+
+## NFC 这一项的最终状态
+
+| 能力 | 状态 |
+|---|---|
+| 上电 + NCI 初始化 | ✅ 开机自动 |
+| RF 轮询 | ✅ 常驻 |
+| 卡片检测 | ✅ |
+| 读取 UID / ATQA / SAK | ✅ 与 PC 读卡器逐字段一致 |
+| 开机自启服务 | ✅ `mi9-nfcd.service` |
+| 重复初始化（不重启） | ⚠️ 每次开机一次（实际使用无影响） |
+| MIFARE 扇区读写 | ⬜ 未做（需要 RF 数据交换命令） |
