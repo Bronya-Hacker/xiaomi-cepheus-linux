@@ -329,3 +329,45 @@ WiFi: 能上外网；USB: 169.254.42.1 + 192.168.2.2
 蓝牙 hci0: UP，66 个模块
 密码/公钥: 保留（能 SSH 登录）
 ```
+
+---
+
+# ★ 一键刷机包（干净系统）—— 2026-10-23
+
+现在有一个**双击就能刷**的完整包，刷完是一台干净的 Linux 服务器。
+
+## 下载
+
+https://github.com/Bronya-Hacker/xiaomi-cepheus-linux/releases/tag/clean-2026-10-19
+
+把所有文件下到同一个文件夹（`rootfs.img.tar.zst.part0` / `.part1` 是分割的大文件，
+`flash-all.bat` 会自动合并）。
+
+## 怎么刷（3 步）
+
+1. 手机进 fastboot：**关机 → 按住 音量下 + 电源**，屏幕出现 `FASTBOOT`
+2. USB 连电脑
+3. **双击 `flash-all.bat`**，按提示回车
+
+脚本会：校验文件 → 合并分段 → 解压 → 刷 boot / recovery / userdata → 重启。全程约 10 分钟。
+
+## 刷完
+
+- 首次开机约 1 分钟，文件系统自动扩到 110G
+- `root` 密码 **`mi9`**（建议登录后 `passwd` 改掉）
+- 登录：`ssh root@169.254.42.1`（USB）或 `ssh root@<手机WiFi IP>`
+- 如果提示 host key 变了（正常，重装过系统）：`ssh-keygen -R 169.254.42.1`
+
+## 包里的东西
+
+| 文件 | 刷到哪 | 内容 |
+|---|---|---|
+| `boot.img` | `boot` (sde49) | UEFI 引导 + 设备树 |
+| `recovery.img` | `recovery` (sda28) | 内核 + 模块 + 启动脚本 |
+| `rootfs.img.tar.zst.part0/1` | `userdata` (sda31) | 根文件系统（解压后 10G）|
+
+## 这个包是用 AI 做的
+
+整个移植过程 —— 读内核源码、改驱动、写设备树、编译、分析日志、定位 bug、
+写工具和文档 —— 绝大部分由 AI 完成。人负责动手：插线、刷机、重启、
+贴卡、听声音、确认现象。详见 `docs/about.md`。
