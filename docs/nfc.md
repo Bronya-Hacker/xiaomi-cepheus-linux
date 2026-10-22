@@ -748,3 +748,46 @@ execl("/usr/bin/pw-play", "pw-play", "/usr/share/mi9/nfc-beep.wav", NULL);
    不重新初始化。`kill -USR1 $(pidof mi9-nfcd)` 即可恢复轮询。
 2. raw socket 会话结束时内核会 `RF_DEACTIVATE`，之后需要重新轮询
    （同上，用 `kill -USR1`）。
+
+---
+
+# 贴卡提示音实测成功（2026-10-22 15:30）
+
+```
+[15:30:24] ★ 卡片 UID = BC 33 55 81   (SENS_RES=0004 SEL_RES=08 协议=2)
+耳机里"滴滴"两声
+```
+
+完整链路：**贴卡 → NFC 识别 → PipeWire → A2DP → EDIFIER W800BT Plus**
+
+## 蓝牙耳机（EDIFIER W800BT Plus，`0C:AE:BD:6E:34:4A`）
+
+踩到的点：
+
+1. **必须先在电脑上断开**，否则耳机不广播、扫描完全找不到
+2. 耳机配对模式只保持约 2 分钟，所以做了**后台自动配对**：
+   每 20 秒扫一次，看到就 pair + trust + connect
+3. 配对过程中 `hci0 auth failed (Rejected)` 是正常的（耳机先拒绝再重试就成功了）
+4. 连上后自动成为默认 sink，`wpctl status` 能看到
+   `* 46. EDIFIER W800BT Plus`
+
+## 开机自启的三个服务
+
+| 服务 | 作用 |
+|---|---|
+| `mi9-nfcd` | NFC 初始化 + 轮询 + 读卡 + 贴卡提示音 |
+| `mi9-bt-pair` | 自动配对并连接蓝牙耳机 |
+| `mi9-bt-speaker` | （可选）小爱音箱的保活/自动连接 |
+
+## 提示音
+
+`/usr/share/mi9/nfc-beep.wav`：2100Hz 两声 + 2800Hz 一声，约 300ms。
+
+守护进程是 system 服务，播放前必须设 `XDG_RUNTIME_DIR=/run/user/0`。
+
+音量用 `wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.75` 调到 0.75（0.4 时偏小）。
+
+## 现在的完整体验
+
+拿卡贴到手机背面顶部 → 耳机"滴滴" → 日志出现卡号。
+全部开机自动，不需要任何手动操作。

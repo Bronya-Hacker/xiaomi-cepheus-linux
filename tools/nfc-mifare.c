@@ -165,11 +165,15 @@ static int transceive(const unsigned char *tx, int txlen,
 	int r, i;
 
 	r = send(sock, tx, txlen, 0);
-	if (r < 0) return -1;
+	if (r < 0) { printf("  [dbg] send 失败: %s\n", strerror(errno)); return -1; }
+	if (r != txlen) printf("  [dbg] send 只发了 %d/%d\n", r, txlen);
 	for (i = 0; i < wait_ms; i++) {
 		r = recv(sock, rx, rxmax, MSG_DONTWAIT);
 		if (r > 0) return r;
-		if (r < 0 && errno != EAGAIN && errno != EWOULDBLOCK) return -1;
+		if (r < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+		printf("  [dbg] recv 错误: %s\n", strerror(errno));
+		return -1;
+	}
 		usleep(1000);
 	}
 	return -2;
@@ -182,7 +186,8 @@ static int mifare_auth_a(int block)
 	int r, i;
 
 	tx[0] = 0x60; tx[1] = (unsigned char)block;
-	r = transceive(tx, 2, rx, sizeof(rx), 80);
+	r = transceive(tx, 2, rx, sizeof(rx), 400);
+	printf("  [dbg] AUTH 发送 60 %02x，收到 %d 字节\n", block, r);
 	if (r < 4) { printf("AUTH: 没收到 nt (r=%d)\n", r); return -1; }
 
 	nt = rx[0] | (rx[1] << 8) | (rx[2] << 16) | ((uint32_t)rx[3] << 24);
@@ -222,7 +227,8 @@ static int mifare_read_block(int block, unsigned char *out)
 	int r, i;
 
 	tx[0] = 0x30; tx[1] = (unsigned char)block;
-	r = transceive(tx, 2, rx, sizeof(rx), 80);
+	r = transceive(tx, 2, rx, sizeof(rx), 400);
+	printf("  [dbg] AUTH 发送 60 %02x，收到 %d 字节\n", block, r);
 	if (r < 16) {
 		printf("READ: 回应 %d 字节 (%s)\n", r, authed ? "长度不对" : "未认证");
 		return -1;
