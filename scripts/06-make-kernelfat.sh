@@ -36,7 +36,14 @@ fi
 IMG="$OUT/kernelfat.img"
 rm -f "$IMG"
 dd if=/dev/zero of="$IMG" bs=1M count="$SIZE_MB" status=none
-mformat -F -i "$IMG" ::
+# ★ 用 4096 字节扇区 + FAT16：
+#   1) UFS 逻辑块是 4096，512 字节扇区的 FAT 会被 Linux 拒绝挂载
+#      （"logical sector size too small for device"）→ 现在能直接 mount
+#   2) 64MB 在 4096 扇区下只有 16384 个簇，达不到 FAT32 的最低 65525 簇，
+#      所以必须用 FAT16（EDK2 和 Linux 都支持）
+#   3) 别用 mformat -S：它只改 BPB 的每扇区字节数，总扇区数仍按 512 算，
+#      导致几何差 8 倍（挂载报 511M，写入会越界）
+mkfs.vfat -F 16 -S 4096 -n KERNELFAT "$IMG" >/dev/null
 
 mcopy -i "$IMG" "$OUT/Image"          ::/Image
 
