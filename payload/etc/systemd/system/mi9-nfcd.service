@@ -1,0 +1,15 @@
+[Unit]
+Description=Mi9 NFC 守护进程（初始化 + 轮询 + 读卡）
+Documentation=https://github.com/Bronya-Hacker/xiaomi-cepheus-linux
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/mi9-nfcd 0
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

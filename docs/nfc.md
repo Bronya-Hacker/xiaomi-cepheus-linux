@@ -584,3 +584,44 @@ num=2，两个配置分别是 `(00,01)` NFC-A 轮询 和 `(02,01)` NFC-F 轮询�
 2. 或者让驱动在 `set_mode(COLD)` 时同时把 I2C 客户端也"软复位"一下；
 3. 或者干脆每次初始化前 unbind/rebind 驱动（现在 rebind 后设备不出现，说明
    还有 probe 失败的问题要查）。
+
+---
+
+# ★★★★★★ NFC 完整可用（2026-10-22 08:06）
+
+## 成品
+
+```
+# systemctl status mi9-nfcd
+● mi9-nfcd.service - Mi9 NFC 守护进程（初始化 + 轮询 + 读卡）
+   Active: active (running)
+   enabled
+
+# journalctl -u mi9-nfcd
+NFC 已启动（设备 0），开始监听...
+[08:05:44] ★ 卡片 UID = BC 33 55 81   (SENS_RES=0004 SEL_RES=08 协议=2)
+```
+
+贴卡即输出行号，无需任何手动操作。
+
+## 结构
+
+`tools/mi9-nfcd.c`（约 300 行）：
+
+1. 通过 NFC netlink 发 `DEV_UP` + `START_POLL`，**进程常驻**保持 socket
+2. `poll()` 同时监听两个 fd：
+   - netlink socket → `NFC_EVENT_TARGETS_FOUND` 等事件
+   - `/dev/kmsg` → 驱动打印的 `NCIRAW RX: 61 05 ...` 原始帧
+3. 从 `RF_INTF_ACTIVATED_NTF` 里按 NCI 字段顺序解析出
+   SENS_RES / NFCID1(UID) / SEL_RES / 协议，带时间戳打印
+
+为什么 UID 要从 kmsg 拿：主线 netlink 的 `nfc_targets_found()` 只带设备索引，
+不带 target 属性（NFCID1 等），所以只能从驱动的原始帧日志里取。
+
+`payload/etc/systemd/system/mi9-nfcd.service`：开机自启，`Restart=always`。
+
+## 已知限制
+
+- 每次开机只能初始化一次；`DEV_DOWN` 后再 `DEV_UP` 会超时。
+  对实际使用无影响（服务常驻，一次初始化就够）。
+- 只读到 UID/SAK，还没做 MIFARE 扇区读写（需要发 RF 数据交换命令）。
