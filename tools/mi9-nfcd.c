@@ -16,6 +16,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <poll.h>
+#include <signal.h>
 #include <errno.h>
 #include <time.h>
 #include <fcntl.h>
@@ -168,6 +169,25 @@ static int start_poll(int fd, int fam, unsigned int idx, unsigned int protos)
 	return 0;
 }
 
+/* 贴卡提示音：通过 PipeWire 播放（守护进程是 system 服务，
+ * 需要显式指定 XDG_RUNTIME_DIR 才能连上 PipeWire）
+ */
+static void play_beep(void)
+{
+	pid_t p;
+
+	if (access("/usr/share/mi9/nfc-beep.wav", R_OK) != 0)
+		return;
+	p = fork();
+	if (p == 0) {
+		setenv("XDG_RUNTIME_DIR", "/run/user/0", 1);
+		setsid();
+		execl("/usr/bin/pw-play", "pw-play",
+			"/usr/share/mi9/nfc-beep.wav", (char *)NULL);
+		_exit(1);
+	}
+}
+
 static void now_str(char *b, size_t n)
 {
 	time_t t = time(NULL);
@@ -237,9 +257,13 @@ static void parse_nci_line(const char *line)
 			printf("   (SENS_RES=%04X SEL_RES=%02X 协议=%u)\n",
 			       sens_res, sel_res, buf[5]);
 			fflush(stdout);
+			play_beep();
 		}
 	}
 }
+
+static volatile sig_atomic_t repoll_flag;
+static void on_usr1(int sig) { (void)sig; repoll_flag = 1; }
 
 int main(int argc, char **argv)
 {
@@ -265,6 +289,7 @@ int main(int argc, char **argv)
 	send_dev_cmd(nlfd, fam, NFC_CMD_DEV_UP, idx);
 	usleep(600000);
 	start_poll(nlfd, fam, idx, 0x1f);
+	signal(SIGUSR1, on_usr1);
 	printf("NFC 已启动（设备 %u），开始监听...\n", idx);
 
 	kmfd = open("/dev/kmsg", O_RDONLY | O_NONBLOCK);
@@ -283,6 +308,11 @@ int main(int argc, char **argv)
 			nf = 2;
 		}
 
+		if (repoll_flag) {
+			repoll_flag = 0;
+			start_poll(nlfd, fam, idx, 0x1f);
+			printf("repoll sent\n");
+		}
 		r = poll(pf, nf, 2000);
 		if (r < 0 && errno != EINTR) {
 			perror("poll");

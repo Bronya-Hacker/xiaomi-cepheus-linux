@@ -701,3 +701,50 @@ ISO/IEC 14443A (106 kbps) target:
 | 开机自启服务 | ✅ `mi9-nfcd.service` |
 | 重复初始化（不重启） | ⚠️ 每次开机一次（实际使用无影响） |
 | MIFARE 扇区读写 | ⬜ 未做（需要 RF 数据交换命令） |
+
+---
+
+# 贴卡提示音 + MIFARE 读写工具（2026-10-22 15:10）
+
+## 贴卡提示音
+
+`mi9-nfcd` 检测到卡片后，通过 PipeWire 播放
+`/usr/share/mi9/nfc-beep.wav`（2100Hz 两声 + 2800Hz 一声）。
+
+守护进程是 system 服务，**必须显式设置** `XDG_RUNTIME_DIR=/run/user/0`
+才能连上 PipeWire：
+
+```c
+setenv("XDG_RUNTIME_DIR", "/run/user/0", 1);
+setsid();
+execl("/usr/bin/pw-play", "pw-play", "/usr/share/mi9/nfc-beep.wav", NULL);
+```
+
+实测：蓝牙音箱（小爱音箱-3418）作为默认输出时，
+贴卡 → 音箱"滴滴"响，日志同时打印 UID。
+
+## 蓝牙音箱
+
+- `bluetoothctl connect` 有时会 `page-timeout`，音箱需要在开机状态
+- 连上后**可能立刻断开**，用 `mi9-bt-speaker.sh start` 的守护进程自动重连
+- A2DP 节点出现后会自动成为默认 sink：`46. 小爱音箱-3418`
+
+## MIFARE 读写工具 `nfc-mifare`
+
+```sh
+./nfc-mifare read 0                  # 认证 + 读块 0
+./nfc-mifare write 4 <32位hex>        # 写块 4
+./nfc-mifare dump                    # 读全部 64 块
+./nfc-mifare key <12位hex>            # 指定 Key A（默认 FFFFFFFFFFFF）
+```
+
+实现了完整的 Crypto1（参考 Proxmark3/crapto1）+ AUTH-A 三轮挑战应答。
+
+### 又踩到的两个坑
+
+1. **`systemctl restart mi9-nfcd` 会把 NFC 弄坏** —— 因为它会重新
+   `DEV_UP`，触发那个"每次开机只能初始化一次"的限制。
+   给守护进程加了 `SIGUSR1` 处理：收到信号只重新发 `START_POLL`，
+   不重新初始化。`kill -USR1 $(pidof mi9-nfcd)` 即可恢复轮询。
+2. raw socket 会话结束时内核会 `RF_DEACTIVATE`，之后需要重新轮询
+   （同上，用 `kill -USR1`）。
