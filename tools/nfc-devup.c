@@ -355,6 +355,15 @@ static int listen_events(int fd, const char *name, int seconds,int fam, unsigned
 				printf(">>> NFC 事件 cmd=%d len=%d\n",
 				       gh->cmd, nh->nlmsg_len);
 				{
+					int q;
+					unsigned char *pb = (unsigned char *)nh;
+
+					printf("    原始:");
+					for (q = 0; q < (int)nh->nlmsg_len; q++)
+						printf(" %02x", pb[q]);
+					printf("\n");
+				}
+				{
 					struct nlattr *a;
 					int alen = nh->nlmsg_len -
 						   NLMSG_LENGTH(GENL_HDRLEN);
